@@ -8,7 +8,6 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.example.myapplication.signal.PpgSample
 import com.example.myapplication.signal.PpgFrameAnalyzer
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -27,14 +26,15 @@ class Camera2PpgController(private val context: Context) {
     private val cameraOpenCloseLock = Semaphore(1)
     private val frameAnalyzer = PpgFrameAnalyzer()
 
-    var onFrameAvailable: ((PpgSample) -> Unit)? = null
+    // Usamos FrameFeatures como tipo de salida para el pipeline refactorizado
+    var onFrameAvailable: ((PpgFrameAnalyzer.FrameFeatures) -> Unit)? = null
     
     private var lastFrameTimestampNs: Long = 0
     private var actualFps: Double = 0.0
 
     @SuppressLint("MissingPermission")
     fun start() {
-        if (cameraDevice != null) return // Ya está iniciado
+        if (cameraDevice != null) return 
 
         startBackgroundThread()
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -88,8 +88,8 @@ class Camera2PpgController(private val context: Context) {
                 lastFrameTimestampNs = now
                 
                 try {
-                    val ppgSample = frameAnalyzer.analyze(image, actualFps)
-                    onFrameAvailable?.invoke(ppgSample)
+                    val features = frameAnalyzer.analyze(image, actualFps)
+                    onFrameAvailable?.invoke(features)
                 } catch (e: Exception) {
                     Log.e("Camera2PpgController", "Analysis error", e)
                 } finally {
@@ -102,16 +102,11 @@ class Camera2PpgController(private val context: Context) {
         val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         requestBuilder.addTarget(surface)
 
-        // CONFIGURACIÓN PARA FLASH Y PPG ESTABLE
         requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
         requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        
-        // AE_LOCK es fundamental para evitar ruido al medir variaciones de luz ínfimas
         requestBuilder.set(CaptureRequest.CONTROL_AE_LOCK, true)
-        
-        // Desactivar AF para evitar vibraciones de lente
         requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f) // Infinito o fijo
+        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
 
         device.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {

@@ -16,116 +16,92 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.signal.PpgSignalQuality
+import com.example.myapplication.signal.MeasurementState
+import com.example.myapplication.signal.Spo2Estimator
 import com.example.myapplication.viewmodel.MonitorViewModel
 
-/**
- * Monitor Cardiaco de Grado Médico/Forense.
- * Diseño optimizado para visualización de alta fidelidad (60 FPS).
- */
 @Composable
 fun MonitorScreen(viewModel: MonitorViewModel) {
     val uiState by viewModel.uiState.collectAsState()
 
     val backgroundColor = Color(0xFF070B14)
     val normalSignalColor = Color(0xFF22C55E)
-    val arrhythmiaColor = Color(0xFFEF4444)
+    val alertColor = Color(0xFFEF4444)
     val peakColor = Color(0xFF3B82F6)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundColor)
-    ) {
-        // 1. MONITOR DE ONDAS (Full Screen Canvas)
+    Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
+        
+        // 1. WAVEFORM DOMINANTE (Fondo)
         WaveformDisplay(
-            waveform = uiState.filteredWaveform,
+            waveform = uiState.waveform,
+            state = uiState.state,
             isArhythmic = uiState.isArhythmic,
-            validityState = uiState.validityState,
             normalColor = normalSignalColor,
-            alertColor = arrhythmiaColor,
-            peakColor = peakColor
+            alertColor = alertColor
         )
 
-        // 2. OVERLAY DE MÉTRICAS Y TELEMETRÍA
+        // 2. OVERLAY TÉCNICO
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Cabecera: Información de Sesión
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            // Header: Estado y Diagnóstico
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
+                    Text("BIOMEDICAL PPG MONITOR", color = peakColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        "LIVE PPG DIAGNOSTIC",
-                        color = peakColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        uiState.statusMessage.uppercase(),
-                        color = if (uiState.validityState >= PpgSignalQuality.PpgValidityState.PPG_VALID) Color.White else Color.Gray,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
+                        uiState.statusMessage,
+                        color = if (uiState.state == MeasurementState.MEASURING) normalSignalColor else Color.White.copy(alpha = 0.6f),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black
                     )
                 }
                 
                 if (uiState.isArhythmic) {
-                    Surface(
-                        color = arrhythmiaColor,
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        Text(
-                            " ARRITMIA DETECTADA ",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(4.dp)
-                        )
+                    Surface(color = alertColor, shape = MaterialTheme.shapes.small) {
+                        Text(" PULSO IRREGULAR ", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(4.dp))
                     }
                 }
             }
 
-            // Centro: Métricas Críticas
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MetricItem("BPM", uiState.bpm.toString(), if(uiState.isArhythmic) arrhythmiaColor else normalSignalColor)
-                MetricItem("SpO2", if (uiState.bpm > 0) "${uiState.spo2}%" else "--", Color.Cyan)
-            }
-
-            // Pie: Datos Técnicos Forenses
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .padding(8.dp)
-            ) {
+            // Centro: Métricas (Solo si hay señal)
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TechnicalData("SQI", "%.1f%%".format(uiState.sqi))
-                    TechnicalData("FPS", "%.1f".format(uiState.actualFps))
-                    TechnicalData("PI", "%.2f%%".format(uiState.sqi / 10.0)) // Estimación de Perfusión
+                    MetricDisplay("BPM", uiState.bpm?.toString() ?: "--", if (uiState.isArhythmic) alertColor else normalSignalColor)
+                    
+                    val spo2Val = if (uiState.spo2Status == Spo2Estimator.Spo2Status.VALID) "${uiState.spo2}%" 
+                                 else if (uiState.spo2Status == Spo2Estimator.Spo2Status.UNCALIBRATED) "${uiState.spo2}%*"
+                                 else "--"
+                    MetricDisplay("SpO2", spo2Val, Color.Cyan)
+                }
+            }
+
+            // Footer: Telemetría Forense
+            Column(
+                modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.5f)).padding(8.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    InfoItem("SQI", "%.2f".format(uiState.sqi))
+                    InfoItem("FPS", "%.1f".format(uiState.actualFps))
+                    InfoItem("RR", if (uiState.rrIntervals.isNotEmpty()) "${uiState.rrIntervals.last()}ms" else "--")
                 }
                 
-                Spacer(modifier = Modifier.height(12.dp))
+                if (uiState.spo2Status == Spo2Estimator.Spo2Status.UNCALIBRATED) {
+                    Text("* CALIBRACIÓN NO VERIFICADA", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
                 
                 Button(
                     onClick = { viewModel.start() },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                    shape = MaterialTheme.shapes.medium
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
                 ) {
-                    Text("START SENSOR / FLASH TORCH", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("ACTIVAR SENSORES", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -135,119 +111,69 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
 @Composable
 fun WaveformDisplay(
     waveform: List<Double>,
+    state: MeasurementState,
     isArhythmic: Boolean,
-    validityState: PpgSignalQuality.PpgValidityState,
     normalColor: Color,
-    alertColor: Color,
-    peakColor: Color
+    alertColor: Color
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val width = size.width
         val height = size.height
-        
-        // DIBUJO DE RETÍCULA (Estilo Monitor Profesional)
-        val gridCountX = 15
-        val gridCountY = 20
-        val stepX = width / gridCountX
-        val stepY = height / gridCountY
 
-        for (i in 0..gridCountX) {
-            drawLine(
-                color = Color.White.copy(alpha = 0.05f),
-                start = Offset(i * stepX, 0f),
-                end = Offset(i * stepX, height),
-                strokeWidth = 1f
-            )
-        }
-        for (i in 0..gridCountY) {
-            drawLine(
-                color = Color.White.copy(alpha = 0.05f),
-                start = Offset(0f, i * stepY),
-                end = Offset(width, i * stepY),
-                strokeWidth = 1f
-            )
+        // Retícula
+        val gridAlpha = 0.05f
+        for (i in 0..10) {
+            drawLine(Color.White.copy(alpha = gridAlpha), Offset(i * width / 10, 0f), Offset(i * width / 10, height), 1f)
+            drawLine(Color.White.copy(alpha = gridAlpha), Offset(0f, i * height / 10), Offset(width, i * height / 10), 1f)
         }
 
-        if (waveform.size < 2) return@Canvas
+        if (state < MeasurementState.LOCKING_SIGNAL || waveform.isEmpty()) {
+            // Línea plana técnica cuando no hay señal validada
+            drawLine(Color.Gray.copy(alpha = 0.3f), Offset(0f, height / 2), Offset(width, height / 2), 2f)
+            return@Canvas
+        }
 
-        // DIBUJO DE ONDA PPG
+        val points = if (waveform.size > 400) waveform.takeLast(400) else waveform
+        val min = points.minOrNull() ?: -1.0
+        val max = points.maxOrNull() ?: 1.0
+        val range = (max - min).coerceAtLeast(0.0001)
+
         val path = Path()
-        val pointsToDisplay = 300 // Buffer de visualización
-        val drawStepX = width / pointsToDisplay
-        
-        // Auto-escala dinámica (Vanguardista)
-        val recentData = if (waveform.size > pointsToDisplay) waveform.takeLast(pointsToDisplay) else waveform
-        val min = recentData.minOrNull() ?: -1.0
-        val max = recentData.maxOrNull() ?: 1.0
-        val range = (max - min).coerceAtLeast(0.01)
-
+        val stepX = width / 400
         val signalColor = if (isArhythmic) alertColor else normalColor
 
-        recentData.forEachIndexed { index, value ->
-            val x = index * drawStepX
-            val normalized = (value - min) / range
-            // La onda ocupa la parte central para dejar espacio a métricas
-            val y = (height * 0.5f) - (normalized.toFloat() * height * 0.3f)
-            
+        points.forEachIndexed { index, value ->
+            val x = index * stepX
+            val norm = (value - min) / range
+            val y = (height * 0.5f) - (norm.toFloat() * height * 0.3f)
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
 
-        // Sombreado bajo la curva (Estética Médica)
+        drawPath(path, signalColor, style = Stroke(width = 3.dp.toPx()))
+        
+        // Sombreado dinámico
         val fillPath = Path().apply {
             addPath(path)
-            lineTo(recentData.size * drawStepX, height * 0.5f)
+            lineTo(points.size * stepX, height * 0.5f)
             lineTo(0f, height * 0.5f)
             close()
         }
-        
-        drawPath(
-            path = fillPath,
-            brush = Brush.verticalGradient(
-                colors = listOf(signalColor.copy(alpha = 0.2f), Color.Transparent),
-                startY = height * 0.2f,
-                endY = height * 0.5f
-            )
-        )
-
-        drawPath(
-            path = path,
-            color = signalColor,
-            style = Stroke(width = 2.5.dp.toPx())
-        )
-        
-        // Indicador de Picos Recientes
-        if (validityState >= PpgSignalQuality.PpgValidityState.PPG_VALID) {
-            // Dibujar una pequeña marca azul en los puntos más altos del buffer visible
-            val maxVal = recentData.maxOrNull() ?: 0.0
-            recentData.forEachIndexed { index, value ->
-                if (value == maxVal) {
-                    val x = index * drawStepX
-                    val y = (height * 0.5f) - ((value - min) / range).toFloat() * height * 0.3f
-                    drawCircle(peakColor, radius = 4f, center = Offset(x, y))
-                }
-            }
-        }
+        drawPath(fillPath, Brush.verticalGradient(listOf(signalColor.copy(alpha = 0.15f), Color.Transparent)))
     }
 }
 
 @Composable
-fun MetricItem(label: String, value: String, color: Color) {
+fun MetricDisplay(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(
-            value,
-            color = color,
-            fontSize = 80.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = (-2).sp
-        )
+        Text(label, color = Color.White.copy(alpha = 0.4f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = color, fontSize = 90.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-4).sp)
     }
 }
 
 @Composable
-fun TechnicalData(label: String, value: String) {
+fun InfoItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, color = Color.Gray, fontSize = 10.sp)
-        Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
     }
 }

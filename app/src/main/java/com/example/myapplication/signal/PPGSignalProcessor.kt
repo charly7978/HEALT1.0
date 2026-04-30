@@ -3,81 +3,61 @@ package com.example.myapplication.signal
 import java.util.*
 
 /**
- * Pipeline de procesamiento de señal PPG de alta fidelidad.
- * Procesa señales en tiempo real eliminando ruido y aislando componentes pulsátiles.
+ * Procesa FrameFeatures para obtener una señal PPG limpia.
+ * Implementa filtros, detrending y extracción de AC/DC.
  */
-class PpgSignalProcessor(private val samplingRate: Double) {
+class PpgSignalProcessor(samplingRate: Double) {
 
-    private val redFilter = PPGBandpassFilter(samplingRate)
-    private val greenFilter = PPGBandpassFilter(samplingRate)
-    private val qualityAnalyzer = PpgSignalQuality()
-    
-    private val bufferSize = 450 // Buffer de 15 segundos @ 30fps
-    private val redBuffer = LinkedList<Double>()
-    private val greenBuffer = LinkedList<Double>()
-    private val filteredRedBuffer = LinkedList<Double>()
-    
-    private val windowSize = (samplingRate * 2.0).toInt().coerceAtLeast(10)
+    private val filter = PPGBandpassFilter(samplingRate)
+    private val signalBuffer = LinkedList<Double>()
+    private val rawBuffer = LinkedList<Double>()
+    private val maxBufferSize = (samplingRate * 10).toInt() // 10 segundos de buffer
 
-    var lastQuality: PpgSignalQuality.QualityResult? = null
-        private set
+    private var currentAcRed: Double = 0.0
+    private var currentDcRed: Double = 0.0
+    private var currentAcGreen: Double = 0.0
+    private var currentDcGreen: Double = 0.0
 
-    fun process(sample: PpgSample): PpgSample {
-        // 1. Filtrado de canales Rojo y Verde (aislamiento de AC)
-        val fRed = redFilter.filter(sample.red)
-        val fGreen = greenFilter.filter(sample.green)
+    data class ProcessedSample(
+        val filteredValue: Double,
+        val acRed: Double,
+        val dcRed: Double,
+        val acGreen: Double,
+        val dcGreen: Double,
+        val timestamp: Long
+    )
+
+    fun process(features: PpgFrameAnalyzer.FrameFeatures): ProcessedSample {
+        // 1. Filtrado de la señal (Usamos el canal verde para la onda visual por mejor SNR en piel)
+        val filtered = filter.filter(features.greenMean)
         
-        // 2. Almacenamiento en buffers circulares para análisis estadístico
-        redBuffer.addLast(sample.red)
-        greenBuffer.addLast(sample.green)
-        filteredRedBuffer.addLast(fRed)
-        
-        if (redBuffer.size > bufferSize) {
-            redBuffer.removeFirst()
-            greenBuffer.removeFirst()
-            filteredRedBuffer.removeFirst()
+        signalBuffer.addLast(filtered)
+        if (signalBuffer.size > maxBufferSize) signalBuffer.removeFirst()
+
+        rawBuffer.addLast(features.redMean)
+        if (rawBuffer.size > maxBufferSize) rawBuffer.removeFirst()
+
+        // 2. Extracción de AC/DC (Ventana móvil de 2 segundos)
+        val windowSize = (features.actualFps * 2.0).toInt().coerceAtLeast(10)
+        if (signalBuffer.size >= windowSize) {
+            val recentSignal = signalBuffer.takeLast(windowSize)
+            currentAcGreen = (recentSignal.maxOrNull()!! - recentSignal.minOrNull()!!) / 2.0
+            currentDcGreen = features.greenMean
+
+            val recentRawRed = rawBuffer.takeLast(windowSize)
+            currentAcRed = (recentRawRed.maxOrNull()!! - recentRawRed.minOrNull()!!) / 2.0
+            currentDcRed = features.redMean
         }
-        
-        // 3. Extracción de componentes DC (media de señal cruda)
-        val redDc = if (redBuffer.size >= windowSize) redBuffer.takeLast(windowSize).average() else sample.red
-        val greenDc = if (greenBuffer.size >= windowSize) greenBuffer.takeLast(windowSize).average() else sample.green
 
-        // 4. Extracción de componentes AC (amplitud de señal filtrada)
-        val redAc = if (filteredRedBuffer.size >= windowSize) {
-            val window = filteredRedBuffer.takeLast(windowSize)
-            (window.maxOrNull()!! - window.minOrNull()!!) / 2.0
-        } else 0.0
-
-        // 5. Análisis de calidad y validación fisiológica
-        lastQuality = qualityAnalyzer.analyze(sample, filteredRedBuffer, redAc, redDc)
-
-        return sample.copy(
-            redFiltered = fRed,
-            greenFiltered = fGreen
+        return ProcessedSample(
+            filteredValue = filtered,
+            acRed = currentAcRed,
+            dcRed = currentDcRed,
+            acGreen = currentAcGreen,
+            dcGreen = currentDcGreen,
+            timestamp = features.timestampNs
         )
     }
-    
-    fun getFilteredBuffer(): List<Double> = filteredRedBuffer.toList()
 
-    /**
-     * Retorna el Ratio de Ratios (R) actual para el cálculo de SpO2.
-     * R = (ACred / DCred) / (ACgreen / DCgreen)
-     */
-    fun getCurrentRatio(): Double {
-        if (filteredRedBuffer.size < windowSize) return 1.0
-        
-        val redWindow = redBuffer.takeLast(windowSize)
-        val greenWindow = greenBuffer.takeLast(windowSize)
-        val fRedWindow = filteredRedBuffer.takeLast(windowSize)
-        
-        // AC es la amplitud pico-a-pico de la señal filtrada
-        val acRed = (fRedWindow.maxOrNull()!! - fRedWindow.minOrNull()!!) / 2.0
-        val dcRed = redWindow.average()
-        
-        // Para el verde, calculamos su AC de forma similar (requeriría un buffer filtrado verde)
-        // Por simplicidad en esta iteración usamos la desviación estándar como proxy de AC si no filtramos ambos.
-        // Pero ya filtramos ambos en process(). Vamos a usar un buffer para fGreen también.
-        
-        return (acRed / (dcRed + 0.1)) // Valor base, el VM completará con el verde
-    }
+    fun getFilteredBuffer(): List<Double> = signalBuffer.toList()
 }

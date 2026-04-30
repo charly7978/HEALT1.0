@@ -1,80 +1,58 @@
 package com.example.myapplication.signal
 
-import java.util.LinkedList
+import kotlin.math.abs
 
 /**
- * Detector de picos avanzado para señales PPG.
- * Utiliza detección de máximos locales con ventana deslizante y umbral adaptativo dinámico.
+ * Detector de picos PPG con umbral adaptativo y refractariedad.
+ * Solo detecta si la calidad es suficiente.
  */
 class PpgPeakDetector {
 
-    data class ConfirmedBeat(
+    data class BeatEvent(
         val timestampNs: Long,
-        val rrIntervalMs: Long,
-        val confidence: Double,
-        val amplitude: Double
+        val rrMs: Long,
+        val confidence: Double
     )
 
-    private val windowSize = 5
-    private val signalWindow = LinkedList<Double>()
-    private var lastPeakTimestampNs: Long = 0
-    private val refractoryPeriodNs = 300_000_000L // 300ms (max 200 BPM)
+    private var lastPeakTimeNs: Long = 0
+    private var lastValue: Double = 0.0
+    private var isRising: Boolean = false
+    private var adaptiveThreshold: Double = 0.0
     
-    private var adaptiveThreshold = 0.0
-    private val peakAmplitudes = LinkedList<Double>()
+    private val minRRIntervalNs = 350_000_000L // ~170 BPM max
+    private val maxRRIntervalNs = 2_000_000_000L // ~30 BPM min
 
-    fun detect(sample: PpgSample, sqi: Double): ConfirmedBeat? {
-        val value = sample.redFiltered
-        val timestamp = sample.timestampNs
+    fun detect(sample: PpgSignalProcessor.ProcessedSample, sqi: Double): BeatEvent? {
+        if (sqi < 0.5) return null
 
-        signalWindow.addLast(value)
-        if (signalWindow.size > 3) signalWindow.removeFirst()
+        val currentValue = sample.filteredValue
+        val slope = currentValue - lastValue
+        
+        var beat: BeatEvent? = null
 
-        if (signalWindow.size < 3) return null
+        // Detector de máximo local con umbral adaptativo
+        if (isRising && slope < 0 && lastValue > adaptiveThreshold) {
+            val currentTime = sample.timestamp
+            val rrNs = currentTime - lastPeakTimeNs
 
-        // Detección de máximo local: el punto medio es mayor que sus vecinos
-        val prev = signalWindow[0]
-        val curr = signalWindow[1]
-        val next = signalWindow[2]
-
-        if (curr > prev && curr > next && curr > adaptiveThreshold) {
-            val timeSinceLast = timestamp - lastPeakTimestampNs
-            
-            if (timeSinceLast > refractoryPeriodNs) {
-                val rrMs = if (lastPeakTimestampNs == 0L) 0L else timeSinceLast / 1_000_000L
-                
-                // Validación de intervalo fisiológico estricto (30 - 220 BPM)
-                if (rrMs == 0L || (rrMs in 270..2000)) {
-                    val beat = ConfirmedBeat(
-                        timestampNs = timestamp,
-                        rrIntervalMs = rrMs,
-                        confidence = sqi / 100.0,
-                        amplitude = curr
-                    )
-
-                    lastPeakTimestampNs = timestamp
-                    
-                    // Actualizar umbral adaptativo basado en la amplitud del pico
-                    peakAmplitudes.addLast(curr)
-                    if (peakAmplitudes.size > windowSize) peakAmplitudes.removeFirst()
-                    adaptiveThreshold = peakAmplitudes.average() * 0.5
-                    
-                    return beat
-                }
+            if (rrNs in minRRIntervalNs..maxRRIntervalNs) {
+                beat = BeatEvent(
+                    timestampNs = currentTime,
+                    rrMs = rrNs / 1_000_000,
+                    confidence = sqi
+                )
+                lastPeakTimeNs = currentTime
+                // Ajustar umbral adaptativo (60% del pico actual)
+                adaptiveThreshold = adaptiveThreshold * 0.7 + lastValue * 0.3 * 0.6
             }
         }
 
-        // Si no hay picos por mucho tiempo, bajamos el umbral lentamente para recuperar señal
+        isRising = slope > 0
+        lastValue = currentValue
+        
+        // Decaimiento lento del umbral para no perder picos si la amplitud baja
         adaptiveThreshold *= 0.995
-        if (adaptiveThreshold < 0.01) adaptiveThreshold = 0.01
 
-        return null
-    }
-
-    fun reset() {
-        signalWindow.clear()
-        peakAmplitudes.clear()
-        lastPeakTimestampNs = 0
-        adaptiveThreshold = 0.0
+        return beat
     }
 }

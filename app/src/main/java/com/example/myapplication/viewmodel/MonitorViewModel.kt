@@ -15,32 +15,35 @@ class MonitorViewModel(
     private val feedbackController: BeatFeedbackController
 ) : ViewModel() {
 
-    data class MonitorState(
-        val bpm: Int = 0,
-        val spo2: Int = 0,
-        val isPhysiological: Boolean = false,
+    data class MonitorUiState(
+        val state: MeasurementState = MeasurementState.CAMERA_READY,
+        val bpm: Int? = null,
+        val spo2: Int? = null,
+        val spo2Status: Spo2Estimator.Spo2Status = Spo2Estimator.Spo2Status.NOT_AVAILABLE,
         val sqi: Double = 0.0,
-        val validityState: PpgSignalQuality.PpgValidityState = PpgSignalQuality.PpgValidityState.RAW_OPTICAL_ONLY,
-        val filteredWaveform: List<Double> = emptyList(),
+        val waveform: List<Double> = emptyList(),
+        val isArhythmic: Boolean = false,
+        val statusMessage: String = "SISTEMA LISTO",
         val actualFps: Double = 0.0,
-        val statusMessage: String = "Esperando señal...",
-        val isArhythmic: Boolean = false
+        val rrIntervals: List<Long> = emptyList()
     )
 
-    private val _uiState = MutableStateFlow(MonitorState())
+    private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState = _uiState.asStateFlow()
 
+    private val frameAnalyzer = PpgFrameAnalyzer()
+    private val contactGate = PhysiologicalContactGate()
     private val signalProcessor = PpgSignalProcessor(30.0)
+    private val qualityEngine = PpgSignalQualityEngine()
     private val peakDetector = PpgPeakDetector()
-    private val rhythmAnalyzer = RhythmAnalyzer()
     private val spo2Estimator = Spo2Estimator()
-    private val physiologyClassifier = PpgPhysiologyClassifier()
-    
+    private val rhythmAnalyzer = RhythmAnalyzer()
+
     private val rrHistory = LinkedList<Long>()
 
     init {
-        cameraController.onFrameAvailable = { sample ->
-            processSample(sample)
+        cameraController.onFrameAvailable = { features ->
+            processFrame(features)
         }
     }
 
@@ -52,75 +55,96 @@ class MonitorViewModel(
         cameraController.stop()
     }
 
-    private fun processSample(sample: PpgSample) {
+    private fun processFrame(features: PpgFrameAnalyzer.FrameFeatures) {
         viewModelScope.launch {
-            val processed = signalProcessor.process(sample)
-            val quality = signalProcessor.lastQuality ?: return@launch
+            // 1. Gate Fisiológico (Anti-objetos)
+            val contactFeatures = PhysiologicalContactGate.ContactFeatures(
+                redMean = features.redMean,
+                greenMean = features.greenMean,
+                blueMean = features.blueMean,
+                lumaMean = features.lumaMean,
+                saturationRatio = features.clippedPixelRatio,
+                clippedPixelRatio = features.clippedPixelRatio,
+                skinLikeScore = 0.0 
+            )
+            
+            val gateState = contactGate.evaluate(contactFeatures)
+            if (gateState == MeasurementState.INVALID_SIGNAL || gateState == MeasurementState.SEARCHING_FINGER) {
+                resetMetrics(gateState, features.actualFps)
+                return@launch
+            }
 
-            // 1. Detección de latidos SIEMPRE ACTIVA (Uso Forense)
-            // No bloqueamos por fisiología, procesamos lo que venga
-            val beat = peakDetector.detect(processed, quality.sqi)
+            // 2. Procesamiento de Señal
+            val processed = signalProcessor.process(features)
 
-            if (beat != null) {
-                // FEEDBACK INMEDIATO: Sonido y Vibración
-                feedbackController.trigger()
-                
-                if (beat.rrIntervalMs > 0) {
-                    rrHistory.addLast(beat.rrIntervalMs)
+            // 3. Calidad de Señal
+            val sqiResult = qualityEngine.compute(
+                features = features,
+                acRed = processed.acRed,
+                acGreen = processed.acGreen,
+                isPeriodical = rrHistory.size > 2
+            )
+
+            // 4. Detección de Latidos y SpO2
+            var currentBpm: Int? = null
+            var currentSpo2: Spo2Estimator.Spo2Result? = null
+
+            if (sqiResult.state == MeasurementState.MEASURING || sqiResult.state == MeasurementState.LOCKING_SIGNAL) {
+                val beat = peakDetector.detect(processed, sqiResult.totalSqi)
+                if (beat != null) {
+                    feedbackController.trigger()
+                    rrHistory.addLast(beat.rrMs)
                     if (rrHistory.size > 30) rrHistory.removeFirst()
                     rhythmAnalyzer.analyze(rrHistory)
                 }
+
+                if (rrHistory.isNotEmpty()) {
+                    currentBpm = (60000.0 / rrHistory.takeLast(10).average()).toInt()
+                }
+
+                currentSpo2 = spo2Estimator.estimate(
+                    acRed = processed.acRed, dcRed = processed.dcRed,
+                    acGreen = processed.acGreen, dcGreen = processed.dcGreen,
+                    sqi = sqiResult.totalSqi
+                )
             }
 
-            // 2. Cálculo de métricas continuo
-            val currentBpm = if (rrHistory.size >= 2) {
-                (60000.0 / rrHistory.takeLast(10).average()).toInt()
-            } else 0
-
-            // Cálculo de SpO2 usando la amplitud real detectada por el procesador
-            val spo2Result = if (quality.state >= PpgSignalQuality.PpgValidityState.PPG_CANDIDATE) {
-                // Cálculo dinámico de AC/DC para SpO2
-                val currentAcRed = if (signalProcessor.getFilteredBuffer().size >= 20) {
-                    val window = signalProcessor.getFilteredBuffer().takeLast(20)
-                    (window.maxOrNull()!! - window.minOrNull()!!) / 2.0
-                } else 0.1
-
-                spo2Estimator.estimate(
-                    redAc = currentAcRed,
-                    redDc = sample.red,
-                    greenAc = (sample.green * 0.015).coerceAtLeast(0.05),
-                    greenDc = sample.green,
-                    sqi = quality.sqi
-                )
-            } else null
-
-            // 3. Actualizar UI
+            // 5. Actualizar UI
             _uiState.value = _uiState.value.copy(
+                state = sqiResult.state,
                 bpm = currentBpm,
-                spo2 = if (currentBpm > 0 && spo2Result != null) spo2Result.spo2.toInt() else 0,
-                isPhysiological = quality.isPhysiological,
-                sqi = quality.sqi,
-                validityState = quality.state,
-                filteredWaveform = signalProcessor.getFilteredBuffer(),
-                actualFps = sample.actualFps,
-                statusMessage = getStatusDescription(quality.state),
-                isArhythmic = rhythmAnalyzer.isArhythmic
+                spo2 = currentSpo2?.value,
+                spo2Status = currentSpo2?.status ?: Spo2Estimator.Spo2Status.NOT_AVAILABLE,
+                sqi = sqiResult.totalSqi,
+                waveform = if (sqiResult.state >= MeasurementState.LOCKING_SIGNAL) signalProcessor.getFilteredBuffer() else emptyList(),
+                isArhythmic = rhythmAnalyzer.isArhythmic,
+                statusMessage = getStatusMessage(sqiResult.state),
+                actualFps = features.actualFps,
+                rrIntervals = rrHistory.toList()
             )
         }
     }
 
-    private fun getStatusDescription(state: PpgSignalQuality.PpgValidityState): String {
-        return when(state) {
-            PpgSignalQuality.PpgValidityState.RAW_OPTICAL_ONLY -> "Buscando dedo..."
-            PpgSignalQuality.PpgValidityState.NO_PHYSIOLOGICAL_SIGNAL -> "Señal no humana detectada"
-            PpgSignalQuality.PpgValidityState.PPG_CANDIDATE -> "Analizando pulso..."
-            PpgSignalQuality.PpgValidityState.PPG_VALID -> "Pulso estable"
-            PpgSignalQuality.PpgValidityState.BIOMETRIC_VALID -> "Señal biométrica óptima"
-        }
+    private fun resetMetrics(state: MeasurementState, fps: Double) {
+        rrHistory.clear()
+        _uiState.value = _uiState.value.copy(
+            state = state,
+            bpm = null,
+            spo2 = null,
+            waveform = emptyList(),
+            statusMessage = getStatusMessage(state),
+            actualFps = fps
+        )
     }
 
-    override fun onCleared() {
-        stop()
-        super.onCleared()
+    private fun getStatusMessage(state: MeasurementState) = when(state) {
+        MeasurementState.SEARCHING_FINGER -> "COLOQUE DEDO EN CÁMARA"
+        MeasurementState.SATURATED -> "LUZ DEMASIADO FUERTE"
+        MeasurementState.MOTION_ARTIFACT -> "MANTENGA PRESIONADO SIN MOVER"
+        MeasurementState.LOW_QUALITY -> "MEJORANDO SEÑAL..."
+        MeasurementState.LOCKING_SIGNAL -> "SINCRONIZANDO PULSO..."
+        MeasurementState.MEASURING -> "MEDICIÓN ACTIVA"
+        MeasurementState.INVALID_SIGNAL -> "SEÑAL NO FISIOLÓGICA"
+        else -> "SISTEMA INICIALIZANDO"
     }
 }

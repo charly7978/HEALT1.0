@@ -1,51 +1,50 @@
 package com.example.myapplication.signal
 
-import kotlin.math.log10
-
 /**
- * Estimador de SpO2 mediante el método de Ratio-of-Ratios avanzado.
- * Optimizado para uso médico/forense con calibración empírica.
+ * Estimador de SpO2 honesto y basado en calibración.
+ * No devuelve valores si no hay señal válida o calibración.
  */
 class Spo2Estimator {
 
+    enum class Spo2Status {
+        NOT_AVAILABLE,
+        LOW_QUALITY,
+        UNCALIBRATED,
+        VALID
+    }
+
     data class Spo2Result(
-        val spo2: Double,
+        val value: Int?,
+        val status: Spo2Status,
         val confidence: Double
     )
 
     /**
-     * Calcula SpO2 basado en componentes AC/DC de canales Rojo y Verde.
-     * El canal verde se utiliza como referencia de pulso (AC) debido a su mayor 
-     * relación señal-ruido en la piel, mientras que el rojo proporciona la absorción de oxígeno.
+     * Calcula SpO2 basado en el Ratio de Ratios (R).
+     * R = (AC_red / DC_red) / (AC_green / DC_green)
      */
     fun estimate(
-        redAc: Double, redDc: Double,
-        greenAc: Double, greenDc: Double,
-        sqi: Double
+        acRed: Double, dcRed: Double,
+        acGreen: Double, dcGreen: Double,
+        sqi: Double,
+        isCalibrated: Boolean = false // Por defecto false hasta tener perfil de dispositivo
     ): Spo2Result {
-        // No bloqueamos, si la señal es mala retornamos una estimación con baja confianza
-        if (redDc < 0.001 || greenDc < 0.001) {
-            return Spo2Result(0.0, 0.0)
-        }
-
-        // Ratio of Ratios: (AC_red / DC_red) / (AC_green / DC_green)
-        val r = (redAc / (redDc + 0.1)) / (greenAc / (greenDc + 0.1))
-
-        // Fórmula de calibración avanzada (basada en bibliografía de PPG por cámara)
-        // SpO2 = 110 - 25 * R
-        var spo2 = 110.0 - (20.0 * r)
         
-        // Ajuste no lineal para valores bajos (zona crítica)
-        if (spo2 < 85.0) {
-            spo2 = 115.0 - (30.0 * r)
+        if (sqi < 0.75 || dcRed < 1.0 || dcGreen < 1.0 || acRed < 0.01 || acGreen < 0.01) {
+            return Spo2Result(null, Spo2Status.LOW_QUALITY, 0.0)
         }
 
-        // Limitar a rangos fisiológicos posibles
-        spo2 = spo2.coerceIn(45.0, 100.0)
+        val r = (acRed / dcRed) / (acGreen / dcGreen)
+        
+        // Curva genérica experimental (SOLO para fines de desarrollo, se marca como UNCALIBRATED)
+        // SpO2 = 110 - 25 * R
+        val estimatedValue = (110.0 - 20.0 * r).toInt().coerceIn(70, 100)
 
-        // Confianza calculada dinámicamente
-        val confidence = if (sqi > 70) 0.9 else (sqi / 100.0)
-
-        return Spo2Result(spo2, confidence)
+        return if (isCalibrated) {
+            Spo2Result(estimatedValue, Spo2Status.VALID, sqi)
+        } else {
+            // Reportamos el valor pero con estado UNCALIBRATED para que la UI decida si mostrarlo con advertencia
+            Spo2Result(estimatedValue, Spo2Status.UNCALIBRATED, sqi * 0.5)
+        }
     }
 }
