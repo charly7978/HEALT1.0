@@ -9,39 +9,37 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import com.example.myapplication.camera.Camera2Controller
-import com.example.myapplication.signal.MotionArtifactDetector
-import com.example.myapplication.ui.FullScreenPpgMonitor
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.myapplication.ui.MonitorScreen
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import com.example.myapplication.viewmodel.MonitorViewModel
+import androidx.compose.runtime.Composable
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var viewModel: MonitorViewModel
-    private lateinit var motionDetector: MotionArtifactDetector
+    private var monitorViewModel: MonitorViewModel? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            viewModel.startMonitoring()
+            monitorViewModel?.start()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Mantener pantalla encendida y pantalla completa
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
 
-        val cameraController = Camera2Controller(this)
-        motionDetector = MotionArtifactDetector(this)
-        viewModel = MonitorViewModel(cameraController, motionDetector)
-
         setContent {
             MyApplicationTheme {
-                FullScreenPpgMonitor(viewModel)
+                val vm: MonitorViewModel = viewModel()
+                monitorViewModel = vm
+                MonitorScreen(vm)
             }
         }
 
@@ -49,30 +47,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkCameraPermission() {
-        when {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                viewModel.startMonitoring()
-            }
-            else -> {
-                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            monitorViewModel?.start()
+        } else {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
     override fun onResume() {
         super.onResume()
-        motionDetector.start()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            viewModel.startMonitoring()
+            monitorViewModel?.start()
         }
     }
 
     override fun onPause() {
         super.onPause()
-        motionDetector.stop()
-        viewModel.stopMonitoring()
+        monitorViewModel?.stop()
     }
 }

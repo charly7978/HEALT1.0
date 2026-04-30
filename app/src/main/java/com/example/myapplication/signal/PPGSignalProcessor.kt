@@ -1,14 +1,16 @@
 package com.example.myapplication.signal
 
 import kotlin.math.max
-import kotlin.math.min
 
-class PPGSignalProcessor(private val samplingRate: Double) {
+/**
+ * Pipeline de procesamiento de señal PPG: Filtrado, AC/DC y Calidad.
+ */
+class PpgSignalProcessor(private val samplingRate: Double) {
 
     private val bandpassFilter = PPGBandpassFilter(samplingRate)
     private val dcBuffer = mutableListOf<Double>()
     private val acBuffer = mutableListOf<Double>()
-    private val bufferSize = (samplingRate * 2).toInt() // 2 segundos para AC/DC
+    private val bufferSize = (samplingRate * 3).toInt() // 3 segundos para métricas estables
 
     data class SignalResult(
         val rawValue: Double,
@@ -21,10 +23,8 @@ class PPGSignalProcessor(private val samplingRate: Double) {
     )
 
     fun process(value: Double): SignalResult {
-        // 1. Filtrado
         val filtered = bandpassFilter.filter(value)
 
-        // 2. Cálculo de AC y DC dinámico
         dcBuffer.add(value)
         if (dcBuffer.size > bufferSize) dcBuffer.removeAt(0)
         
@@ -33,41 +33,33 @@ class PPGSignalProcessor(private val samplingRate: Double) {
 
         val dc = if (dcBuffer.isNotEmpty()) dcBuffer.average() else value
         val ac = if (acBuffer.isNotEmpty()) {
-            (acBuffer.maxOrNull() ?: 0.0) - (acBuffer.minOrNull() ?: 0.0)
+            acBuffer.max() - acBuffer.min()
         } else 0.0
 
-        // 3. Índice de Perfusión (PI)
-        val pi = if (dc > 0) (ac / dc) * 100.0 else 0.0
+        val pi = if (dc > 1.0) (ac / dc) * 100.0 else 0.0
 
-        // 4. Normalización para visualización (0..1)
+        // Normalización 0..1 para canvas
         val minAC = acBuffer.minOrNull() ?: -1.0
         val maxAC = acBuffer.maxOrNull() ?: 1.0
-        val range = max(0.1, maxAC - minAC)
+        val range = max(0.01, maxAC - minAC)
         val normalized = (filtered - minAC) / range
 
-        // 5. Signal Quality Index (SQI) simplificado
-        // Se basa en la estabilidad de la amplitud y relación AC/DC razonable
         val sqi = calculateSQI(ac, dc, pi)
 
-        return SignalResult(
-            rawValue = value,
-            filteredValue = filtered,
-            normalizedValue = normalized,
-            ac = ac,
-            dc = dc,
-            perfusionIndex = pi,
-            sqi = sqi
-        )
+        return SignalResult(value, filtered, normalized, ac, dc, pi, sqi)
     }
 
     private fun calculateSQI(ac: Double, dc: Double, pi: Double): Double {
-        if (dc < 10 || ac < 0.1) return 0.0
-        
+        if (dc < 5 || ac < 0.05) return 0.0
         var score = 0.0
-        if (pi in 0.1..10.0) score += 0.5
-        if (ac > 0.5) score += 0.3
-        if (dc in 50.0..240.0) score += 0.2
-        
-        return score * 100.0
+        if (pi in 0.05..15.0) score += 50.0
+        if (ac > 0.2) score += 30.0
+        if (dc in 20.0..250.0) score += 20.0
+        return score
+    }
+
+    fun reset() {
+        dcBuffer.clear()
+        acBuffer.clear()
     }
 }
