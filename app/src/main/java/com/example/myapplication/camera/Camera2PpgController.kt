@@ -8,7 +8,7 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.example.myapplication.signal.PpgFrame
+import com.example.myapplication.signal.PpgSample
 import com.example.myapplication.signal.PpgFrameAnalyzer
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -27,7 +27,7 @@ class Camera2PpgController(private val context: Context) {
     private val cameraOpenCloseLock = Semaphore(1)
     private val frameAnalyzer = PpgFrameAnalyzer()
 
-    var onFrameAvailable: ((PpgFrame) -> Unit)? = null
+    var onFrameAvailable: ((PpgSample) -> Unit)? = null
     
     private var lastFrameTimestampNs: Long = 0
     private var actualFps: Double = 0.0

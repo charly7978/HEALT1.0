@@ -1,16 +1,15 @@
 package com.example.myapplication.signal
 
-import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.media.Image
-import java.nio.ByteBuffer
 
 /**
  * Analiza un frame de cámara (YUV_420_888) para extraer características ópticas PPG.
+ * No simula datos, extrae promedios RGB reales y estadísticas de la ROI.
  */
 class PpgFrameAnalyzer {
 
-    fun analyze(image: Image, fpsEstimate: Double): PpgFrame {
+    fun analyze(image: Image, fps: Double): PpgSample {
         val width = image.width
         val height = image.height
         
@@ -32,6 +31,7 @@ class PpgFrameAnalyzer {
         var sumR = 0.0
         var sumG = 0.0
         var sumB = 0.0
+        var sqSumR = 0.0
         var saturatedCount = 0
         var darkCount = 0
         val totalPixels = roiWidth * roiHeight
@@ -46,7 +46,7 @@ class PpgFrameAnalyzer {
                 val uVal = (uBuffer[uvIndex].toInt() and 0xFF) - 128
                 val vVal = (vBuffer[uvIndex].toInt() and 0xFF) - 128
 
-                // Conversión YUV a RGB
+                // Conversión YUV a RGB (Estándar BT.601)
                 val r = (yVal + 1.370705 * vVal).coerceIn(0.0, 255.0)
                 val g = (yVal - 0.337633 * uVal - 0.698001 * vVal).coerceIn(0.0, 255.0)
                 val b = (yVal + 1.732446 * uVal).coerceIn(0.0, 255.0)
@@ -54,33 +54,38 @@ class PpgFrameAnalyzer {
                 sumR += r
                 sumG += g
                 sumB += b
+                sqSumR += r * r
 
-                if (r > 250) saturatedCount++
-                if (r < 15) darkCount++
+                if (r > 252) saturatedCount++
+                if (r < 3) darkCount++
             }
         }
 
         val avgR = sumR / totalPixels
         val avgG = sumG / totalPixels
         val avgB = sumB / totalPixels
+        
+        // Desviación estándar para SNR
+        val varianceR = (sqSumR / totalPixels) - (avgR * avgR)
+        val stdDevR = Math.sqrt(Math.max(0.0, varianceR))
 
-        val redDominance = if (avgG + avgB > 0) avgR / ((avgG + avgB) / 2.0) else avgR
-
-        return PpgFrame(
+        return PpgSample(
             timestampNs = image.timestamp,
-            fpsEstimate = fpsEstimate,
-            avgRed = avgR,
-            avgGreen = avgG,
-            avgBlue = avgB,
-            redAc = 0.0, // Se calculará en el buffer
-            greenAc = 0.0,
-            blueAc = 0.0,
-            roiRect = roi,
-            saturationRatio = saturatedCount.toDouble() / totalPixels,
-            darknessRatio = darkCount.toDouble() / totalPixels,
-            textureScore = 0.0, // Futura implementación
-            redDominance = redDominance,
-            skinLikelihood = 0.0 // Futura implementación
+            red = avgR,
+            green = avgG,
+            blue = avgB,
+            actualFps = fps,
+            roiStats = RoiStats(
+                meanRed = avgR,
+                stdDevRed = stdDevR,
+                meanGreen = avgG,
+                meanBlue = avgB
+            ),
+            diagnostics = SampleDiagnostics(
+                clippingHigh = (saturatedCount.toDouble() / totalPixels) > 0.1,
+                clippingLow = (darkCount.toDouble() / totalPixels) > 0.1,
+                lowLight = avgR < 10.0
+            )
         )
     }
 }

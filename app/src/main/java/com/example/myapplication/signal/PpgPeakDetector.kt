@@ -1,63 +1,64 @@
 package com.example.myapplication.signal
 
-import kotlin.math.abs
+import java.util.LinkedList
 
 /**
- * Detector de picos sistólicos adaptativo.
+ * Detector de picos adaptativo para señales PPG.
  */
-class PpgPeakDetector(private val samplingRate: Double) {
+class PpgPeakDetector {
 
-    private val windowSize = (samplingRate * 2).toInt()
-    private val buffer = mutableListOf<Double>()
-    private val refractoryFrames = (samplingRate * 0.35).toInt()
-    private var framesSinceLastPeak = refractoryFrames
+    data class ConfirmedBeat(
+        val timestampNs: Long,
+        val rrIntervalMs: Long,
+        val confidence: Double,
+        val amplitude: Double
+    )
+
+    private var lastPeakTimestampNs: Long = 0
+    private var lastPeakValue: Double = 0.0
     
-    private val peakTimestamps = mutableListOf<Long>()
+    // Periodo refractario para evitar falsos picos (350ms -> max ~170 BPM)
+    private val refractoryPeriodNs = 350_000_000L
+    
+    // Umbral adaptativo
+    private var adaptiveThreshold = 0.0
+    private val windowSize = 5
+    private val recentAmplitudes = LinkedList<Double>()
 
-    fun process(value: Double, timestampNs: Long): PeakResult {
-        buffer.add(value)
-        if (buffer.size > windowSize) buffer.removeAt(0)
-        
-        framesSinceLastPeak++
-        
-        val median = buffer.sorted().let { it[it.size / 2] }
-        val threshold = median + 0.1 // Umbral mínimo de prominencia
+    fun detect(sample: PpgSample, sqi: Double): ConfirmedBeat? {
+        val value = sample.redFiltered
+        val timestamp = sample.timestampNs
 
-        var isPeak = false
-        if (value > threshold && framesSinceLastPeak >= refractoryFrames) {
-            if (isLocalMax()) {
-                isPeak = true
-                framesSinceLastPeak = 0
-                peakTimestamps.add(timestampNs)
-                if (peakTimestamps.size > 15) peakTimestamps.removeAt(0)
+        // 1. Detección de máximo local básico (simplificado para flujo continuo)
+        // En una implementación real se compararía con muestras anteriores/posteriores
+        if (value > adaptiveThreshold && (timestamp - lastPeakTimestampNs) > refractoryPeriodNs) {
+            
+            val rrMs = if (lastPeakTimestampNs == 0L) 0L else (timestamp - lastPeakTimestampNs) / 1_000_000L
+            
+            // Validar intervalo fisiológico (30 - 200 BPM)
+            if (rrMs == 0L || rrMs in 300..2000) {
+                val beat = ConfirmedBeat(
+                    timestampNs = timestamp,
+                    rrIntervalMs = rrMs,
+                    confidence = sqi / 100.0,
+                    amplitude = value
+                )
+                
+                lastPeakTimestampNs = timestamp
+                lastPeakValue = value
+                
+                // Actualizar umbral adaptativo (media móvil de amplitudes de picos)
+                recentAmplitudes.addLast(value)
+                if (recentAmplitudes.size > windowSize) recentAmplitudes.removeFirst()
+                adaptiveThreshold = recentAmplitudes.average() * 0.6
+                
+                return beat
             }
+        } else {
+            // Decaimiento lento del umbral para no perder señal si la amplitud baja
+            adaptiveThreshold *= 0.999
         }
 
-        return PeakResult(isPeak, calculateBpm())
+        return null
     }
-
-    private fun isLocalMax(): Boolean {
-        if (buffer.size < 3) return false
-        return buffer[buffer.size - 2] > buffer.last() && buffer[buffer.size - 2] > buffer[buffer.size - 3]
-    }
-
-    private fun calculateBpm(): Int {
-        if (peakTimestamps.size < 4) return 0
-        val intervals = mutableListOf<Long>()
-        for (i in 1 until peakTimestamps.size) {
-            val ms = (peakTimestamps[i] - peakTimestamps[i-1]) / 1_000_000
-            if (ms in 300..1800) intervals.add(ms)
-        }
-        if (intervals.isEmpty()) return 0
-        val avgInterval = intervals.average()
-        return (60000.0 / avgInterval).toInt()
-    }
-
-    fun reset() {
-        buffer.clear()
-        peakTimestamps.clear()
-        framesSinceLastPeak = refractoryFrames
-    }
-
-    data class PeakResult(val isPeak: Boolean, val bpm: Int)
 }

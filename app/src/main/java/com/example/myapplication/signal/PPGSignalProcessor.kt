@@ -1,65 +1,49 @@
 package com.example.myapplication.signal
 
-import kotlin.math.max
+import java.util.*
 
 /**
- * Pipeline de procesamiento de señal PPG: Filtrado, AC/DC y Calidad.
+ * Procesa el flujo de muestras PPG, aplicando filtrado y calculando métricas de calidad.
  */
-class PpgSignalProcessor(private val samplingRate: Double) {
+class PpgSignalProcessor(samplingRate: Double) {
 
-    private val bandpassFilter = PPGBandpassFilter(samplingRate)
-    private val dcBuffer = mutableListOf<Double>()
-    private val acBuffer = mutableListOf<Double>()
-    private val bufferSize = (samplingRate * 3).toInt() // 3 segundos para métricas estables
+    private val filter = PPGBandpassFilter(samplingRate)
+    private val qualityAnalyzer = PpgSignalQuality()
+    
+    private val bufferSize = 300 // ~10 segundos a 30fps
+    private val redBuffer = LinkedList<Double>()
+    private val filteredBuffer = LinkedList<Double>()
+    
+    var lastQuality: PpgSignalQuality.QualityResult? = null
+        private set
 
-    data class SignalResult(
-        val rawValue: Double,
-        val filteredValue: Double,
-        val normalizedValue: Double,
-        val ac: Double,
-        val dc: Double,
-        val perfusionIndex: Double,
-        val sqi: Double
-    )
-
-    fun process(value: Double): SignalResult {
-        val filtered = bandpassFilter.filter(value)
-
-        dcBuffer.add(value)
-        if (dcBuffer.size > bufferSize) dcBuffer.removeAt(0)
+    fun process(sample: PpgSample): PpgSample {
+        // 1. Filtrado
+        val filtered = filter.filter(sample.red)
         
-        acBuffer.add(filtered)
-        if (acBuffer.size > bufferSize) acBuffer.removeAt(0)
-
-        val dc = if (dcBuffer.isNotEmpty()) dcBuffer.average() else value
-        val ac = if (acBuffer.isNotEmpty()) {
-            acBuffer.max() - acBuffer.min()
+        // 2. Gestión de Buffers
+        redBuffer.addLast(sample.red)
+        filteredBuffer.addLast(filtered)
+        if (redBuffer.size > bufferSize) {
+            redBuffer.removeFirst()
+            filteredBuffer.removeFirst()
+        }
+        
+        // 3. Cálculo de AC/DC dinámico (ventana corta para SpO2 y PI)
+        val dc = if (redBuffer.size > 10) redBuffer.takeLast(10).average() else sample.red
+        val ac = if (filteredBuffer.size > 10) {
+            val window = filteredBuffer.takeLast(10)
+            window.maxOrNull()!! - window.minOrNull()!!
         } else 0.0
 
-        val pi = if (dc > 1.0) (ac / dc) * 100.0 else 0.0
+        // 4. Análisis de Calidad
+        lastQuality = qualityAnalyzer.analyze(sample, filteredBuffer, ac, dc)
 
-        // Normalización 0..1 para canvas
-        val minAC = acBuffer.minOrNull() ?: -1.0
-        val maxAC = acBuffer.maxOrNull() ?: 1.0
-        val range = max(0.01, maxAC - minAC)
-        val normalized = (filtered - minAC) / range
-
-        val sqi = calculateSQI(ac, dc, pi)
-
-        return SignalResult(value, filtered, normalized, ac, dc, pi, sqi)
+        return sample.copy(
+            redFiltered = filtered,
+            greenFiltered = 0.0 // Opcional si se quiere filtrar verde también
+        )
     }
-
-    private fun calculateSQI(ac: Double, dc: Double, pi: Double): Double {
-        if (dc < 5 || ac < 0.05) return 0.0
-        var score = 0.0
-        if (pi in 0.05..15.0) score += 50.0
-        if (ac > 0.2) score += 30.0
-        if (dc in 20.0..250.0) score += 20.0
-        return score
-    }
-
-    fun reset() {
-        dcBuffer.clear()
-        acBuffer.clear()
-    }
+    
+    fun getFilteredBuffer(): List<Double> = filteredBuffer.toList()
 }

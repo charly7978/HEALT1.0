@@ -4,7 +4,7 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * Analizador de ritmo cardíaco basado en intervalos pulso-a-pulso.
+ * Analizador de ritmo cardíaco basado en intervalos RR (Peak-to-Peak).
  */
 class RhythmAnalyzer {
 
@@ -25,54 +25,45 @@ class RhythmAnalyzer {
         val irregularityIndex: Double
     )
 
-    private val ppiBuffer = mutableListOf<Long>()
-    private val maxBufferSize = 100
+    var isArhythmic: Boolean = false
+        private set
 
-    fun addInterval(ppiMs: Long) {
-        if (ppiMs in 300..2000) {
-            ppiBuffer.add(ppiMs)
-            if (ppiBuffer.size > maxBufferSize) ppiBuffer.removeAt(0)
-        }
-    }
-
-    fun analyze(): RhythmMetrics {
-        if (ppiBuffer.size < 10) {
+    fun analyze(rrIntervals: List<Long>): RhythmMetrics {
+        if (rrIntervals.size < 5) {
+            isArhythmic = false
             return RhythmMetrics(RhythmState.INSUFFICIENT_DATA, 0.0, 0.0, 0.0, 0.0, 0.0)
         }
 
-        val mean = ppiBuffer.average()
+        val mean = rrIntervals.average()
         
         // SDNN
-        val sdnn = sqrt(ppiBuffer.map { (it - mean).pow(2.0) }.sum() / ppiBuffer.size)
+        val sdnn = sqrt(rrIntervals.map { (it - mean).pow(2.0) }.sum() / rrIntervals.size)
         
         // RMSSD
         var sumDiffSq = 0.0
         var nn50Count = 0
-        for (i in 0 until ppiBuffer.size - 1) {
-            val diff = Math.abs(ppiBuffer[i+1] - ppiBuffer[i]).toDouble()
+        for (i in 0 until rrIntervals.size - 1) {
+            val diff = Math.abs(rrIntervals[i+1] - rrIntervals[i]).toDouble()
             sumDiffSq += diff.pow(2.0)
             if (diff > 50.0) nn50Count++
         }
-        val rmssd = sqrt(sumDiffSq / (ppiBuffer.size - 1))
-        val pnn50 = (nn50Count.toDouble() / (ppiBuffer.size - 1)) * 100.0
+        val rmssd = sqrt(sumDiffSq / (rrIntervals.size - 1))
+        val pnn50 = (nn50Count.toDouble() / (rrIntervals.size - 1)) * 100.0
         
         val cv = (sdnn / mean) * 100.0
 
-        // Índice de irregularidad simplificado
+        // Índice de irregularidad
         val irregularityIndex = (rmssd / mean) * 100.0
 
         val state = when {
-            ppiBuffer.size < 20 -> RhythmState.INSUFFICIENT_DATA
+            rrIntervals.size < 10 -> RhythmState.INSUFFICIENT_DATA
             cv > 15.0 || pnn50 > 30.0 -> RhythmState.POSSIBLE_AF_PATTERN_EXPERIMENTAL
             cv > 8.0 || rmssd > 80.0 -> RhythmState.IRREGULAR
-            cv > 5.0 -> RhythmState.POSSIBLE_ECTOPIC_BEATS
             else -> RhythmState.REGULAR
         }
 
-        return RhythmMetrics(state, rmssd, sdnn, pnn50, cv, irregularityIndex)
-    }
+        isArhythmic = state != RhythmState.REGULAR && state != RhythmState.INSUFFICIENT_DATA
 
-    fun reset() {
-        ppiBuffer.clear()
+        return RhythmMetrics(state, rmssd, sdnn, pnn50, cv, irregularityIndex)
     }
 }

@@ -3,8 +3,6 @@ package com.example.myapplication.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,206 +16,131 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.signal.PpgValidityState
-import com.example.myapplication.signal.RhythmAnalyzer
+import com.example.myapplication.signal.PpgSignalQuality
 import com.example.myapplication.viewmodel.MonitorViewModel
 
 @Composable
 fun MonitorScreen(viewModel: MonitorViewModel) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A))
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(Color.Black)
     ) {
-        Text(
-            text = "CARDIO MONITOR PRO",
-            color = Color.White,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold
+        // 1. MONITOR DE ONDAS (Fondo completo)
+        WaveformDisplay(
+            waveform = uiState.filteredWaveform,
+            isValid = uiState.isPhysiological
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // 2. MÉTRICAS FLOTANTES (Overlay)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Cabecera: Título y Status
+            Column {
+                Text(
+                    "PPG CONTINUOUS MONITOR",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    uiState.statusMessage,
+                    color = if (uiState.isPhysiological) Color.Green else Color.Red,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
 
-        // Estado de Validez
-        StatusIndicator(uiState.validityState, uiState.statusMessage)
+            // Centro: Métricas principales
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MetricDisplay("BPM", uiState.bpm.toString(), Color.Red)
+                MetricDisplay("SpO2", if (uiState.spo2 > 0) "${uiState.spo2}%" else "--", Color.Cyan)
+            }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Pantalla de Ondas
-        WaveformPanel(
-            ppgWaveform = uiState.ppgWaveform,
-            rawWaveform = uiState.rawWaveform,
-            isValid = uiState.validityState == PpgValidityState.PPG_VALID || uiState.validityState == PpgValidityState.PPG_CANDIDATE
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Métricas Principales
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            MetricCard("BPM", uiState.currentBpm.takeIf { it > 0 }?.toString() ?: "--", Color.Red)
-            MetricCard("SpO2", uiState.currentSpo2?.let { "%.1f%%".format(it) } ?: "--", Color.Cyan)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Análisis de Ritmo
-        RhythmCard(uiState.rhythmState)
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Telemetría Técnica (Debug)
-        TelemetryPanel(uiState)
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Controles
-        ControlPanel(
-            isRunning = uiState.isRunning,
-            beepEnabled = uiState.beepEnabled,
-            vibrationEnabled = uiState.vibrationEnabled,
-            onToggleStart = { if (uiState.isRunning) viewModel.stop() else viewModel.start() },
-            onToggleBeep = viewModel::toggleBeep,
-            onToggleVibration = viewModel::toggleVibration
-        )
-    }
-}
-
-@Composable
-fun StatusIndicator(state: PpgValidityState, message: String) {
-    val color = when(state) {
-        PpgValidityState.PPG_VALID -> Color.Green
-        PpgValidityState.PPG_CANDIDATE -> Color.Yellow
-        PpgValidityState.NO_PPG_PHYSIOLOGICAL_SIGNAL -> Color.Red
-        PpgValidityState.SATURATED -> Color.Magenta
-        else -> Color.Gray
-    }
-    
-    Card(
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.2f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            text = message,
-            color = color,
-            modifier = Modifier.padding(12.dp),
-            fontWeight = FontWeight.Medium,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-    }
-}
-
-@Composable
-fun WaveformPanel(ppgWaveform: List<Float>, rawWaveform: List<Float>, isValid: Boolean) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.Black),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(220.dp)
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Rejilla de fondo
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = size.width / 10
-                for (i in 0..10) {
-                    drawLine(Color.DarkGray, Offset(i * step, 0f), Offset(i * step, size.height), 0.5f)
+            // Pie: Telemetría técnica
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(8.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    SmallMetric("FPS", "%.1f".format(uiState.actualFps))
+                    SmallMetric("SQI", "%.1f".format(uiState.sqi))
+                    SmallMetric("RHYTHM", if (uiState.isArhythmic) "IRREGULAR" else "REGULAR")
                 }
             }
-
-            // Onda Cruda (Siempre visible, tenue)
-            PpgWaveformCanvas(rawWaveform, Color.Gray.copy(alpha = 0.4f), label = "RAW OPTICAL")
-
-            // Onda PPG Filtrada (Solo si hay señal candidato/válida)
-            if (isValid) {
-                PpgWaveformCanvas(ppgWaveform, Color.Green, label = "PPG FILTERED")
-            }
         }
     }
 }
 
 @Composable
-fun PpgWaveformCanvas(points: List<Float>, color: Color, label: String) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Text(label, color = color, fontSize = 10.sp, modifier = Modifier.padding(4.dp))
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            if (points.size < 2) return@Canvas
-            
-            val path = Path()
-            val stepX = size.width / 200f
-            
-            points.forEachIndexed { index, value ->
-                val x = index * stepX
-                val y = size.height - (value * size.height)
-                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            
-            drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
+fun WaveformDisplay(waveform: List<Double>, isValid: Boolean) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        // Rejilla técnica
+        val gridStep = size.height / 10
+        for (i in 0..10) {
+            drawLine(
+                color = Color.DarkGray.copy(alpha = 0.3f),
+                start = Offset(0f, i * gridStep),
+                end = Offset(size.width, i * gridStep),
+                strokeWidth = 1f
+            )
         }
-    }
-}
 
-@Composable
-fun MetricCard(label: String, value: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Color.LightGray, fontSize = 12.sp)
-        Text(value, color = color, fontSize = 32.sp, fontWeight = FontWeight.Black)
-    }
-}
+        if (waveform.size < 2) return@Canvas
 
-@Composable
-fun RhythmCard(state: RhythmAnalyzer.RhythmState) {
-    val text = when(state) {
-        RhythmAnalyzer.RhythmState.REGULAR -> "RITMO REGULAR"
-        RhythmAnalyzer.RhythmState.IRREGULAR -> "RITMO IRREGULAR"
-        RhythmAnalyzer.RhythmState.POSSIBLE_ECTOPIC_BEATS -> "LATIDOS ECTÓPICOS DETECTADOS"
-        RhythmAnalyzer.RhythmState.POSSIBLE_AF_PATTERN_EXPERIMENTAL -> "SOSPECHA DE ARRITMIA (ANÁLISIS REQUERIDO)"
-        RhythmAnalyzer.RhythmState.INSUFFICIENT_DATA -> "ANALIZANDO RITMO..."
-    }
-    Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-}
-
-@Composable
-fun TelemetryPanel(uiState: com.example.myapplication.viewmodel.MonitorUiState) {
-    Column(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha = 0.3f)).padding(8.dp)) {
-        Text("TELEMETRÍA:", color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("FPS: %.1f".format(uiState.fps), color = Color.White, fontSize = 10.sp)
-            Text("SQI: %.1f%%".format(uiState.sqi), color = Color.White, fontSize = 10.sp)
-            Text("PI: %.3f".format(uiState.perfusionIndex), color = Color.White, fontSize = 10.sp)
-        }
-    }
-}
-
-@Composable
-fun ControlPanel(
-    isRunning: Boolean,
-    beepEnabled: Boolean,
-    vibrationEnabled: Boolean,
-    onToggleStart: () -> Unit,
-    onToggleBeep: (Boolean) -> Unit,
-    onToggleVibration: (Boolean) -> Unit
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Button(
-            onClick = onToggleStart,
-            colors = ButtonDefaults.buttonColors(containerColor = if (isRunning) Color.Red else Color(0xFF2E7D32)),
-            modifier = Modifier.fillMaxWidth().height(56.dp)
-        ) {
-            Text(if (isRunning) "DETENER" else "INICIAR MONITOR", fontWeight = FontWeight.Bold)
-        }
+        val path = Path()
+        val stepX = size.width / 300f // Buffer de 300 puntos
         
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = beepEnabled, onCheckedChange = onToggleBeep, colors = CheckboxDefaults.colors(checkmarkColor = Color.Black, uncheckedColor = Color.Gray))
-            Text("Beep", color = Color.White)
-            Spacer(modifier = Modifier.width(16.dp))
-            Checkbox(checked = vibrationEnabled, onCheckedChange = onToggleVibration, colors = CheckboxDefaults.colors(checkmarkColor = Color.Black, uncheckedColor = Color.Gray))
-            Text("Vibración", color = Color.White)
+        // Normalización dinámica para visualización
+        val min = waveform.minOrNull() ?: 0.0
+        val max = waveform.maxOrNull() ?: 1.0
+        val range = if (max - min > 0) max - min else 1.0
+
+        waveform.forEachIndexed { index, value ->
+            val x = index * stepX
+            val normalized = (value - min) / range
+            val y = size.height * 0.7f - (normalized.toFloat() * size.height * 0.4f)
+            
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
+
+        drawPath(
+            path = path,
+            color = if (isValid) Color.Green else Color.Gray,
+            style = Stroke(width = 3.dp.toPx())
+        )
+    }
+}
+
+@Composable
+fun MetricDisplay(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+        Text(
+            value,
+            color = color,
+            fontSize = 64.sp,
+            fontWeight = FontWeight.Black
+        )
+    }
+}
+
+@Composable
+fun SmallMetric(label: String, value: String) {
+    Row {
+        Text("$label: ", color = Color.Gray, fontSize = 10.sp)
+        Text(value, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }

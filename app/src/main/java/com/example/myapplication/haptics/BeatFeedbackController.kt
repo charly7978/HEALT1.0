@@ -26,7 +26,7 @@ class BeatFeedbackController(context: Context) {
     var isBeepEnabled: Boolean = true
     var isVibrationEnabled: Boolean = true
 
-    fun playBeatFeedback() {
+    fun trigger() {
         if (isBeepEnabled) {
             toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 50)
         }
