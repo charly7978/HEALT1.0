@@ -17,11 +17,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.domain.MeasurementState
+import com.example.myapplication.ppg.DeviceCalibrationManager
 import com.example.myapplication.viewmodel.MonitorViewModel
 
 @Composable
 fun MonitorScreen(viewModel: MonitorViewModel) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val calibrationManager = remember { DeviceCalibrationManager(context) }
 
     val backgroundColor = Color(0xFF070B14)
     val normalSignalColor = Color(0xFF22C55E)
@@ -136,8 +139,29 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
                 ) {
                     Text("DETENER", color = Color.White, fontWeight = FontWeight.Bold)
                 }
+                Button(
+                    onClick = { viewModel.showCalibrationScreen() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+                ) {
+                    Text("CALIBRAR", color = Color.White, fontWeight = FontWeight.Bold)
+                }
             }
         }
+    }
+
+    // Pantalla de calibración (overlay)
+    if (uiState.showCalibrationScreen) {
+        CalibrationScreen(
+            calibrationManager = calibrationManager,
+            onCalibrationComplete = {
+                viewModel.hideCalibrationScreen()
+            },
+            onCancel = {
+                viewModel.hideCalibrationScreen()
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 

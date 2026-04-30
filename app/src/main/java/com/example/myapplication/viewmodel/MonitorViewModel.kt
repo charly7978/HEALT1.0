@@ -12,8 +12,10 @@ import com.example.myapplication.forensic.SessionExporter
 import com.example.myapplication.haptics.BeatFeedbackController
 import com.example.myapplication.ppg.ArrhythmiaScreening
 import com.example.myapplication.ppg.BeatClassifier
+import com.example.myapplication.ppg.DeviceCalibrationManager
 import com.example.myapplication.ppg.HeartRateFusion
 import com.example.myapplication.ppg.PpgSample
+import com.example.myapplication.ppg.Spo2Estimator
 import com.example.myapplication.sensors.MotionArtifactEstimator
 import com.example.myapplication.sensors.MotionSensorController
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +47,8 @@ class MonitorViewModel(
         val actualFps: Double = 0.0,
         val exposureTimeNs: Long? = null,
         val iso: Int? = null,
-        val frameDurationNs: Long? = null
+        val frameDurationNs: Long? = null,
+        val showCalibrationScreen: Boolean = false
     )
 
     private val _uiState = MutableStateFlow(MonitorUiState())
@@ -58,6 +61,8 @@ class MonitorViewModel(
     private val beatClassifier = BeatClassifier()
     private val arrhythmiaScreening = ArrhythmiaScreening()
     private val sessionExporter = SessionExporter(context)
+    private val calibrationManager = DeviceCalibrationManager(context)
+    private val spo2Estimator = Spo2Estimator(calibrationManager)
 
     private var currentSession: MeasurementSession? = null
     private val waveformBuffer = LinkedList<Double>()
@@ -85,6 +90,18 @@ class MonitorViewModel(
 
     fun exportSession(): String? {
         return currentSession?.let { sessionExporter.exportSession(it) }
+    }
+
+    fun showCalibrationScreen() {
+        _uiState.value = _uiState.value.copy(showCalibrationScreen = true)
+    }
+
+    fun hideCalibrationScreen() {
+        _uiState.value = _uiState.value.copy(showCalibrationScreen = false)
+    }
+
+    fun hasCalibration(): Boolean {
+        return calibrationManager.hasValidCalibration()
     }
 
     private fun startNewSession() {
