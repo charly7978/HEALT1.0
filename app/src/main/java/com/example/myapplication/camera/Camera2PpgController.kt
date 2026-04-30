@@ -14,7 +14,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
 /**
- * Controlador avanzado de Camera2 optimizado para captura PPG continua.
+ * Controlador avanzado de Camera2 optimizado para captura PPG continua con FLASH estable.
  */
 class Camera2PpgController(private val context: Context) {
 
@@ -34,6 +34,8 @@ class Camera2PpgController(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun start() {
+        if (cameraDevice != null) return // Ya está iniciado
+
         startBackgroundThread()
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         try {
@@ -60,30 +62,39 @@ class Camera2PpgController(private val context: Context) {
                     cameraOpenCloseLock.release()
                     camera.close()
                     cameraDevice = null
+                    Log.e("Camera2PpgController", "Camera error: $error")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
             Log.e("Camera2PpgController", "Start error", e)
+            cameraOpenCloseLock.release()
         }
     }
 
     private fun setupSession(manager: CameraManager, cameraId: String) {
         val device = cameraDevice ?: return
-        val characteristics = manager.getCameraCharacteristics(cameraId)
-
+        
         imageReader = ImageReader.newInstance(320, 240, ImageFormat.YUV_420_888, 3)
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
             if (image != null) {
                 val now = image.timestamp
                 if (lastFrameTimestampNs != 0L) {
-                    actualFps = 1_000_000_000.0 / (now - lastFrameTimestampNs)
+                    val frameDuration = now - lastFrameTimestampNs
+                    if (frameDuration > 0) {
+                        actualFps = 1_000_000_000.0 / frameDuration
+                    }
                 }
                 lastFrameTimestampNs = now
                 
-                val ppgFrame = frameAnalyzer.analyze(image, actualFps)
-                onFrameAvailable?.invoke(ppgFrame)
-                image.close()
+                try {
+                    val ppgSample = frameAnalyzer.analyze(image, actualFps)
+                    onFrameAvailable?.invoke(ppgSample)
+                } catch (e: Exception) {
+                    Log.e("Camera2PpgController", "Analysis error", e)
+                } finally {
+                    image.close()
+                }
             }
         }, backgroundHandler)
 
@@ -91,13 +102,17 @@ class Camera2PpgController(private val context: Context) {
         val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         requestBuilder.addTarget(surface)
 
-        // Configuración crítica: Flash y control manual
+        // CONFIGURACIÓN PARA FLASH Y PPG ESTABLE
         requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-        
-        // Intentar fijar exposición para evitar fluctuaciones
         requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        
+        // AE_LOCK es fundamental para evitar ruido al medir variaciones de luz ínfimas
         requestBuilder.set(CaptureRequest.CONTROL_AE_LOCK, true)
         
+        // Desactivar AF para evitar vibraciones de lente
+        requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f) // Infinito o fijo
+
         device.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
                 captureSession = session
@@ -107,25 +122,35 @@ class Camera2PpgController(private val context: Context) {
                     Log.e("Camera2PpgController", "Repeating request error", e)
                 }
             }
-            override fun onConfigureFailed(session: CameraCaptureSession) {}
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e("Camera2PpgController", "Session configuration failed")
+            }
         }, backgroundHandler)
     }
 
     fun stop() {
-        cameraOpenCloseLock.acquire()
-        captureSession?.close()
-        captureSession = null
-        cameraDevice?.close()
-        cameraDevice = null
-        imageReader?.close()
-        imageReader = null
-        stopBackgroundThread()
-        cameraOpenCloseLock.release()
+        try {
+            if (!cameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) return
+            captureSession?.stopRepeating()
+            captureSession?.close()
+            captureSession = null
+            cameraDevice?.close()
+            cameraDevice = null
+            imageReader?.close()
+            imageReader = null
+            stopBackgroundThread()
+        } catch (e: Exception) {
+            Log.e("Camera2PpgController", "Stop error", e)
+        } finally {
+            cameraOpenCloseLock.release()
+        }
     }
 
     private fun startBackgroundThread() {
-        backgroundThread = HandlerThread("PpgCameraThread").apply { start() }
-        backgroundHandler = Handler(backgroundThread!!.looper)
+        if (backgroundThread == null) {
+            backgroundThread = HandlerThread("PpgCameraThread").apply { start() }
+            backgroundHandler = Handler(backgroundThread!!.looper)
+        }
     }
 
     private fun stopBackgroundThread() {

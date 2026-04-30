@@ -79,6 +79,17 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
                     SmallMetric("SQI", "%.1f".format(uiState.sqi))
                     SmallMetric("RHYTHM", if (uiState.isArhythmic) "IRREGULAR" else "REGULAR")
                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // BOTÓN DE INICIO/PARADA
+                Button(
+                    onClick = { viewModel.start() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("INICIAR MEDICIÓN / ENCENDER FLASH", color = Color.White)
+                }
             }
         }
     }

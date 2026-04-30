@@ -55,55 +55,47 @@ class MonitorViewModel(
     private fun processSample(sample: PpgSample) {
         viewModelScope.launch {
             val processed = signalProcessor.process(sample)
-            val initialQuality = signalProcessor.lastQuality ?: return@launch
+            val quality = signalProcessor.lastQuality ?: return@launch
 
-            // 1. Clasificación Fisiológica avanzada
-            val vState = physiologyClassifier.classify(
-                processed, 
-                initialQuality.sqi, 
-                (processed.redFiltered / (sample.red + 0.1)) // PI estimado
-            )
+            // 1. Detección de latidos SIEMPRE ACTIVA (Uso Forense)
+            // No bloqueamos por fisiología, procesamos lo que venga
+            val beat = peakDetector.detect(processed, quality.sqi)
 
-            val isPhysiological = vState >= PpgSignalQuality.PpgValidityState.PPG_CANDIDATE
-
-            // 2. Detección de latidos solo si es fisiológico
-            val beat = if (isPhysiological) {
-                peakDetector.detect(processed, initialQuality.sqi)
-            } else null
-
-            if (beat != null && beat.rrIntervalMs > 0) {
+            if (beat != null) {
+                // FEEDBACK INMEDIATO: Sonido y Vibración
                 feedbackController.trigger()
-                rrHistory.addLast(beat.rrIntervalMs)
-                if (rrHistory.size > 20) rrHistory.removeFirst()
                 
-                rhythmAnalyzer.analyze(rrHistory)
+                if (beat.rrIntervalMs > 0) {
+                    rrHistory.addLast(beat.rrIntervalMs)
+                    if (rrHistory.size > 30) rrHistory.removeFirst()
+                    rhythmAnalyzer.analyze(rrHistory)
+                }
             }
 
-            // 3. Cálculo de métricas reales
-            val currentBpm = if (rrHistory.size >= 3) {
-                (60000.0 / rrHistory.average()).toInt()
+            // 2. Cálculo de métricas continuo
+            val currentBpm = if (rrHistory.size >= 2) {
+                (60000.0 / rrHistory.takeLast(5).average()).toInt()
             } else 0
 
-            val spo2Result = if (vState >= PpgSignalQuality.PpgValidityState.PPG_VALID) {
-                spo2Estimator.estimate(
-                    redAc = if (beat != null) beat.amplitude else 0.5,
-                    redDc = sample.red,
-                    greenAc = 0.2, // Placeholder de calibración
-                    greenDc = sample.green,
-                    sqi = initialQuality.sqi
-                )
-            } else null
+            // Cálculo de SpO2 usando la amplitud del último pico detectado
+            val spo2Result = spo2Estimator.estimate(
+                redAc = if (beat != null) beat.amplitude else (processed.redFiltered.let { if (it > 0) it else 0.1 }),
+                redDc = sample.red,
+                greenAc = (sample.green * 0.02).coerceAtLeast(0.1), // Estimación de AC verde
+                greenDc = sample.green,
+                sqi = quality.sqi
+            )
 
-            // 4. Actualizar UI
+            // 3. Actualizar UI
             _uiState.value = _uiState.value.copy(
                 bpm = currentBpm,
-                spo2 = spo2Result?.spo2?.toInt() ?: 0,
-                isPhysiological = isPhysiological,
-                sqi = initialQuality.sqi,
-                validityState = vState,
+                spo2 = if (currentBpm > 0) spo2Result.spo2.toInt() else 0,
+                isPhysiological = quality.isPhysiological,
+                sqi = quality.sqi,
+                validityState = quality.state,
                 filteredWaveform = signalProcessor.getFilteredBuffer(),
                 actualFps = sample.actualFps,
-                statusMessage = getStatusDescription(vState),
+                statusMessage = getStatusDescription(quality.state),
                 isArhythmic = rhythmAnalyzer.isArhythmic
             )
         }

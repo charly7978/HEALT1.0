@@ -17,9 +17,25 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 
+import com.example.myapplication.camera.Camera2PpgController
+import com.example.myapplication.haptics.BeatFeedbackController
+
 class MainActivity : ComponentActivity() {
 
     private var monitorViewModel: MonitorViewModel? = null
+
+    class MonitorViewModelFactory(
+        private val cameraController: Camera2PpgController,
+        private val feedbackController: BeatFeedbackController
+    ) : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(MonitorViewModel::class.java)) {
+                @Suppress("UNCHECKED_CAST")
+                return MonitorViewModel(cameraController, feedbackController) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -32,12 +48,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        val cameraController = Camera2PpgController(this)
+        val feedbackController = BeatFeedbackController(this)
+        val factory = MonitorViewModelFactory(cameraController, feedbackController)
+
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
 
         setContent {
             MyApplicationTheme {
-                val vm: MonitorViewModel = viewModel()
+                val vm: MonitorViewModel = viewModel(factory = factory)
                 monitorViewModel = vm
                 MonitorScreen(vm)
             }

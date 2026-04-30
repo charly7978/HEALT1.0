@@ -5,6 +5,7 @@ import kotlin.math.sqrt
 
 /**
  * Analizador de ritmo cardíaco basado en intervalos RR (Peak-to-Peak).
+ * Implementa métricas estándar de HRV (Heart Rate Variability) para detección de arritmias.
  */
 class RhythmAnalyzer {
 
@@ -28,18 +29,21 @@ class RhythmAnalyzer {
     var isArhythmic: Boolean = false
         private set
 
+    var currentMetrics: RhythmMetrics = RhythmMetrics(RhythmState.INSUFFICIENT_DATA, 0.0, 0.0, 0.0, 0.0, 0.0)
+        private set
+
     fun analyze(rrIntervals: List<Long>): RhythmMetrics {
-        if (rrIntervals.size < 5) {
+        if (rrIntervals.size < 4) {
             isArhythmic = false
             return RhythmMetrics(RhythmState.INSUFFICIENT_DATA, 0.0, 0.0, 0.0, 0.0, 0.0)
         }
 
         val mean = rrIntervals.average()
         
-        // SDNN
+        // SDNN (Desviación estándar de los intervalos RR)
         val sdnn = sqrt(rrIntervals.map { (it - mean).pow(2.0) }.sum() / rrIntervals.size)
         
-        // RMSSD
+        // RMSSD (Raíz cuadrada de la media de las diferencias sucesivas al cuadrado)
         var sumDiffSq = 0.0
         var nn50Count = 0
         for (i in 0 until rrIntervals.size - 1) {
@@ -50,20 +54,22 @@ class RhythmAnalyzer {
         val rmssd = sqrt(sumDiffSq / (rrIntervals.size - 1))
         val pnn50 = (nn50Count.toDouble() / (rrIntervals.size - 1)) * 100.0
         
+        // Coeficiente de Variación
         val cv = (sdnn / mean) * 100.0
 
-        // Índice de irregularidad
+        // Índice de irregularidad basado en RMSSD relativo
         val irregularityIndex = (rmssd / mean) * 100.0
 
         val state = when {
-            rrIntervals.size < 10 -> RhythmState.INSUFFICIENT_DATA
             cv > 15.0 || pnn50 > 30.0 -> RhythmState.POSSIBLE_AF_PATTERN_EXPERIMENTAL
-            cv > 8.0 || rmssd > 80.0 -> RhythmState.IRREGULAR
+            cv > 8.0 || rmssd > 65.0 -> RhythmState.IRREGULAR
+            cv > 4.0 -> RhythmState.POSSIBLE_ECTOPIC_BEATS
             else -> RhythmState.REGULAR
         }
 
         isArhythmic = state != RhythmState.REGULAR && state != RhythmState.INSUFFICIENT_DATA
-
-        return RhythmMetrics(state, rmssd, sdnn, pnn50, cv, irregularityIndex)
+        currentMetrics = RhythmMetrics(state, rmssd, sdnn, pnn50, cv, irregularityIndex)
+        
+        return currentMetrics
     }
 }

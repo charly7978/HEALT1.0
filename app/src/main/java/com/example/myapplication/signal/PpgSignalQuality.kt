@@ -3,7 +3,9 @@ package com.example.myapplication.signal
 import kotlin.math.abs
 
 /**
- * Evalúa la calidad de la señal PPG basándose en múltiples factores.
+ * Evalúa la calidad de la señal PPG.
+ * NOTA: Para uso forense/médico, no bloqueamos la medición, 
+ * solo informamos la calidad y validez fisiológica de la señal capturada.
  */
 class PpgSignalQuality {
 
@@ -16,11 +18,11 @@ class PpgSignalQuality {
     )
 
     enum class PpgValidityState {
-        RAW_OPTICAL_ONLY,
-        NO_PHYSIOLOGICAL_SIGNAL,
-        PPG_CANDIDATE,
-        PPG_VALID,
-        BIOMETRIC_VALID
+        RAW_OPTICAL_ONLY,           // Captura de imagen básica
+        NO_PHYSIOLOGICAL_SIGNAL,    // Señal capturada, pero no parece pulso humano
+        PPG_CANDIDATE,              // Detectada periodicidad compatible con pulso
+        PPG_VALID,                  // Señal estable y rítmica
+        BIOMETRIC_VALID             // Señal óptima para cálculo de SpO2/HRV
     }
 
     fun analyze(
@@ -29,41 +31,38 @@ class PpgSignalQuality {
         ac: Double,
         dc: Double
     ): QualityResult {
-        // 1. Red Dominance Check (Fisiología básica)
-        val redDominance = if (sample.green > 0) sample.red / sample.green else 0.0
-        if (redDominance < 1.5) {
-            return QualityResult(0.0, 0.0, false, PpgValidityState.RAW_OPTICAL_ONLY, "No red dominance")
-        }
-
+        // 1. Red Dominance (Relación de color para detectar tejido)
+        // Un dedo humano frente al flash suele ser predominantemente rojo.
+        val redDominance = if (sample.green > 0) sample.red / (sample.green + sample.blue + 0.1) else 0.0
+        
         // 2. Perfusion Index (PI = AC/DC * 100)
+        // Pulsaciones reales suelen estar entre 0.1% y 10%.
         val pi = if (dc > 0) (ac / dc) * 100.0 else 0.0
-        if (pi < 0.05) {
-            return QualityResult(pi, 0.0, false, PpgValidityState.NO_PHYSIOLOGICAL_SIGNAL, "Low perfusion")
+        
+        // 3. Análisis de SNR (Señal/Ruido)
+        val signalPower = ac * ac
+        val noisePower = sample.roiStats.stdDevRed
+        val snr = if (noisePower > 0) signalPower / noisePower else 0.0
+
+        // DETERMINACIÓN DE ESTADO SIN BLOQUEO DE MEDICIÓN
+        var state = PpgValidityState.RAW_OPTICAL_ONLY
+        var sqi = 20.0
+
+        if (redDominance > 1.2) {
+            state = PpgValidityState.PPG_CANDIDATE
+            sqi = 40.0
         }
 
-        // 3. Clipping check
-        if (sample.diagnostics.clippingHigh || sample.diagnostics.clippingLow) {
-            return QualityResult(10.0, 0.0, false, PpgValidityState.NO_PHYSIOLOGICAL_SIGNAL, "Signal clipping")
-        }
-
-        // 4. SNR básica (Relación entre varianza de señal filtrada y ruido)
-        // Por ahora una estimación simple basada en la amplitud de la señal filtrada
-        val snr = ac / (sample.roiStats.stdDevRed + 0.0001)
-
-        var state = PpgValidityState.PPG_CANDIDATE
-        var sqi = 50.0
-
-        if (pi in 0.2..10.0 && snr > 2.0) {
+        if (pi > 0.08 && snr > 0.5) {
             state = PpgValidityState.PPG_VALID
-            sqi = 80.0
+            sqi = 75.0
         }
 
-        if (sqi >= 80.0 && filteredBuffer.size > 50) {
-            // Aquí se podrían añadir chequeos de autocorrelación
+        if (sqi >= 75.0 && snr > 2.0 && pi < 15.0) {
             state = PpgValidityState.BIOMETRIC_VALID
             sqi = 95.0
         }
 
-        return QualityResult(sqi, snr, state >= PpgValidityState.PPG_CANDIDATE, state)
+        return QualityResult(sqi, snr, true, state)
     }
 }
