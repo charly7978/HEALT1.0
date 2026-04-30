@@ -16,8 +16,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.signal.MeasurementState
-import com.example.myapplication.signal.Spo2Estimator
+import com.example.myapplication.domain.MeasurementState
 import com.example.myapplication.viewmodel.MonitorViewModel
 
 @Composable
@@ -28,6 +27,7 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
     val normalSignalColor = Color(0xFF22C55E)
     val alertColor = Color(0xFFEF4444)
     val peakColor = Color(0xFF3B82F6)
+    val warningColor = Color(0xFFF59E0B)
 
     Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
         
@@ -35,7 +35,7 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
         WaveformDisplay(
             waveform = uiState.waveform,
             state = uiState.state,
-            isArhythmic = uiState.isArhythmic,
+            isIrregular = uiState.isIrregular,
             normalColor = normalSignalColor,
             alertColor = alertColor
         )
@@ -48,18 +48,23 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
             // Header: Estado y Diagnóstico
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text("BIOMEDICAL PPG MONITOR", color = peakColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MONITOR PPG FORENSE", color = peakColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(
                         uiState.statusMessage,
-                        color = if (uiState.state == MeasurementState.MEASURING) normalSignalColor else Color.White.copy(alpha = 0.6f),
+                        color = when (uiState.state) {
+                            MeasurementState.MEASURING -> normalSignalColor
+                            MeasurementState.DEGRADED, MeasurementState.INVALID -> alertColor
+                            MeasurementState.WARMUP -> warningColor
+                            else -> Color.White.copy(alpha = 0.6f)
+                        },
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
                 
-                if (uiState.isArhythmic) {
+                if (uiState.isIrregular) {
                     Surface(color = alertColor, shape = MaterialTheme.shapes.small) {
-                        Text(" PULSO IRREGULAR ", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(4.dp))
+                        Text(" IRREGULAR ", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(4.dp))
                     }
                 }
             }
@@ -71,12 +76,11 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    MetricDisplay("BPM", uiState.bpm?.toString() ?: "--", if (uiState.isArhythmic) alertColor else normalSignalColor)
+                    MetricDisplay("BPM", uiState.bpm?.let { "%.0f".format(it) } ?: "--", if (uiState.isIrregular) alertColor else normalSignalColor)
                     
-                    val spo2Val = if (uiState.spo2Status == Spo2Estimator.Spo2Status.VALID) "${uiState.spo2}%" 
-                                 else if (uiState.spo2Status == Spo2Estimator.Spo2Status.UNCALIBRATED) "${uiState.spo2}%*"
-                                 else "--"
-                    MetricDisplay("SpO2", spo2Val, Color.Cyan)
+                    val spo2Val = uiState.spo2?.let { "%.0f".format(it) } ?: "--"
+                    val spo2Color = if (uiState.spo2 != null) Color.Cyan else Color.Gray
+                    MetricDisplay("SpO₂", spo2Val, spo2Color)
                 }
             }
 
@@ -86,22 +90,39 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     InfoItem("SQI", "%.2f".format(uiState.sqi))
+                    InfoItem("PI", "%.2f".format(uiState.perfusionIndex))
+                    InfoItem("MOT", "%.2f".format(uiState.motionScore))
                     InfoItem("FPS", "%.1f".format(uiState.actualFps))
-                    InfoItem("RR", if (uiState.rrIntervals.isNotEmpty()) "${uiState.rrIntervals.last()}ms" else "--")
                 }
                 
-                if (uiState.spo2Status == Spo2Estimator.Spo2Status.UNCALIBRATED) {
-                    Text("* CALIBRACIÓN NO VERIFICADA", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                if (uiState.spo2Message.isNotEmpty()) {
+                    Text(uiState.spo2Message, color = Color.Gray, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                }
+
+                if (uiState.irregularityMessage.isNotEmpty()) {
+                    Text(uiState.irregularityMessage, color = warningColor, fontSize = 10.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 
-                Button(
-                    onClick = { viewModel.start() },
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("ACTIVAR SENSORES", color = Color.White, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = { viewModel.start() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                    ) {
+                        Text("INICIAR", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = { viewModel.stop() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                    ) {
+                        Text("DETENER", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -112,7 +133,7 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
 fun WaveformDisplay(
     waveform: List<Double>,
     state: MeasurementState,
-    isArhythmic: Boolean,
+    isIrregular: Boolean,
     normalColor: Color,
     alertColor: Color
 ) {
@@ -127,7 +148,7 @@ fun WaveformDisplay(
             drawLine(Color.White.copy(alpha = gridAlpha), Offset(0f, i * height / 10), Offset(width, i * height / 10), 1f)
         }
 
-        if (state < MeasurementState.LOCKING_SIGNAL || waveform.isEmpty()) {
+        if (state != MeasurementState.MEASURING || waveform.isEmpty()) {
             // Línea plana técnica cuando no hay señal validada
             drawLine(Color.Gray.copy(alpha = 0.3f), Offset(0f, height / 2), Offset(width, height / 2), 2f)
             return@Canvas
@@ -140,7 +161,7 @@ fun WaveformDisplay(
 
         val path = Path()
         val stepX = width / 400
-        val signalColor = if (isArhythmic) alertColor else normalColor
+        val signalColor = if (isIrregular) alertColor else normalColor
 
         points.forEachIndexed { index, value ->
             val x = index * stepX

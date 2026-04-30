@@ -26,12 +26,13 @@ class MainActivity : ComponentActivity() {
 
     class MonitorViewModelFactory(
         private val cameraController: Camera2PpgController,
-        private val feedbackController: BeatFeedbackController
+        private val feedbackController: BeatFeedbackController,
+        private val context: android.content.Context
     ) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(MonitorViewModel::class.java)) {
                 @Suppress("UNCHECKED_CAST")
-                return MonitorViewModel(cameraController, feedbackController) as T
+                return MonitorViewModel(cameraController, feedbackController, context) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }
@@ -50,7 +51,7 @@ class MainActivity : ComponentActivity() {
         
         val cameraController = Camera2PpgController(this)
         val feedbackController = BeatFeedbackController(this)
-        val factory = MonitorViewModelFactory(cameraController, feedbackController)
+        val factory = MonitorViewModelFactory(cameraController, feedbackController, this)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
