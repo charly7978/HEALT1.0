@@ -74,22 +74,30 @@ class MonitorViewModel(
 
             // 2. Cálculo de métricas continuo
             val currentBpm = if (rrHistory.size >= 2) {
-                (60000.0 / rrHistory.takeLast(5).average()).toInt()
+                (60000.0 / rrHistory.takeLast(10).average()).toInt()
             } else 0
 
-            // Cálculo de SpO2 usando la amplitud del último pico detectado
-            val spo2Result = spo2Estimator.estimate(
-                redAc = if (beat != null) beat.amplitude else (processed.redFiltered.let { if (it > 0) it else 0.1 }),
-                redDc = sample.red,
-                greenAc = (sample.green * 0.02).coerceAtLeast(0.1), // Estimación de AC verde
-                greenDc = sample.green,
-                sqi = quality.sqi
-            )
+            // Cálculo de SpO2 usando la amplitud real detectada por el procesador
+            val spo2Result = if (quality.state >= PpgSignalQuality.PpgValidityState.PPG_CANDIDATE) {
+                // Cálculo dinámico de AC/DC para SpO2
+                val currentAcRed = if (signalProcessor.getFilteredBuffer().size >= 20) {
+                    val window = signalProcessor.getFilteredBuffer().takeLast(20)
+                    (window.maxOrNull()!! - window.minOrNull()!!) / 2.0
+                } else 0.1
+
+                spo2Estimator.estimate(
+                    redAc = currentAcRed,
+                    redDc = sample.red,
+                    greenAc = (sample.green * 0.015).coerceAtLeast(0.05),
+                    greenDc = sample.green,
+                    sqi = quality.sqi
+                )
+            } else null
 
             // 3. Actualizar UI
             _uiState.value = _uiState.value.copy(
                 bpm = currentBpm,
-                spo2 = if (currentBpm > 0) spo2Result.spo2.toInt() else 0,
+                spo2 = if (currentBpm > 0 && spo2Result != null) spo2Result.spo2.toInt() else 0,
                 isPhysiological = quality.isPhysiological,
                 sqi = quality.sqi,
                 validityState = quality.state,
