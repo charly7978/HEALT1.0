@@ -1,6 +1,7 @@
 package com.example.myapplication.ppg
 
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * Clasificador fisiológico PPG estricto.
