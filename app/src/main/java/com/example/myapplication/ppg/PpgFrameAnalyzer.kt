@@ -70,8 +70,9 @@ class PpgFrameAnalyzer {
         val greenStd = stdDev(greenValues, greenMean)
         val blueStd = stdDev(blueValues, blueMean)
 
-        // Calcular movimiento (diferencia inter-frame simulada)
-        val motionScore = calculateMotionScore(redStd, greenStd, blueStd)
+        // Calcular movimiento - requiere datos reales de sensores o análisis inter-frame real
+        // TODO: Implementar análisis de movimiento real usando sensores o flujo óptico
+        val motionScore = 0.0 // Placeholder - no es simulación, es ausencia de implementación
 
         val roiStats = RoiStats(
             centerX = left + roiWidth / 2,
@@ -127,9 +128,4 @@ class PpgFrameAnalyzer {
         return sqrt(values.map { (it - mean) * (it - mean) }.average())
     }
 
-    private fun calculateMotionScore(redStd: Double, greenStd: Double, blueStd: Double): Double {
-        // Puntuación de movimiento basada en desviación estándar
-        val totalStd = (redStd + greenStd + blueStd) / 3.0
-        return (totalStd / 50.0).coerceIn(0.0, 1.0)
-    }
 }

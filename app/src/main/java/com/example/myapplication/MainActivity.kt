@@ -19,23 +19,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 
 import com.example.myapplication.camera.Camera2PpgController
-import com.example.myapplication.ppg.BeatFeedbackController
+import com.example.myapplication.haptics.BeatFeedbackController
 
 class MainActivity : ComponentActivity() {
 
     private var monitorViewModel: MonitorViewModel? = null
+    private lateinit var cameraController: Camera2PpgController
+    private lateinit var feedbackController: BeatFeedbackController
 
     class MonitorViewModelFactory(
         private val cameraController: Camera2PpgController,
         private val feedbackController: BeatFeedbackController,
         private val context: android.content.Context
     ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            if (modelClass.isAssignableFrom(MonitorViewModel::class.java)) {
-                @Suppress("UNCHECKED_CAST")
-                return MonitorViewModel(cameraController, feedbackController, context) as T
+            require(modelClass.isAssignableFrom(MonitorViewModel::class.java)) {
+                "Unknown ViewModel class: ${modelClass.name}"
             }
-            throw IllegalArgumentException("Unknown ViewModel class")
+            return MonitorViewModel(cameraController, feedbackController, context) as T
         }
     }
 
@@ -54,12 +56,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        val cameraController: Camera2PpgController
-        val feedbackController: BeatFeedbackController
-        
         try {
             cameraController = Camera2PpgController(this)
             feedbackController = BeatFeedbackController(this)
+            Log.d("MainActivity", "Controllers initialized successfully")
         } catch (e: Exception) {
             Log.e("MainActivity", "Error creating controllers", e)
             return
@@ -82,16 +82,26 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkCameraPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            monitorViewModel?.start()
-        } else {
-            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        when {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == 
+                PackageManager.PERMISSION_GRANTED -> {
+                monitorViewModel?.start()
+            }
+            shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) -> {
+                // Mostrar explicación antes de solicitar
+                Log.d("MainActivity", "Should show rationale for camera permission")
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+            else -> {
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == 
+            PackageManager.PERMISSION_GRANTED) {
             monitorViewModel?.start()
         }
     }
@@ -99,5 +109,10 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         monitorViewModel?.stop()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        feedbackController.release()
     }
 }
