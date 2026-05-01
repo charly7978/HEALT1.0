@@ -140,8 +140,9 @@ class MonitorViewModel(
 
             val rhythmMetrics = rhythmAnalyzer.analyze()
 
-            // 7. Estimación de SpO2 (solo si hay calibración y señal válida)
-            val spo2Result = if (classification.state == PpgPhysiologyClassifier.PpgValidityState.BIOMETRIC_VALID) {
+            // 7. Estimación de SpO2 (estimar siempre que haya señal fisiológica)
+            val spo2Result = if (classification.state != PpgPhysiologyClassifier.PpgValidityState.RAW_OPTICAL_ONLY &&
+                               classification.state != PpgPhysiologyClassifier.PpgValidityState.NO_PHYSIOLOGICAL_SIGNAL) {
                 spo2Estimator.estimate(
                     acRed = processed.acRed,
                     dcRed = processed.dcRed,

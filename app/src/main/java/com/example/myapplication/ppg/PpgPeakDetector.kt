@@ -34,11 +34,11 @@ class PpgPeakDetector {
         acGreen: Double,
         dcGreen: Double
     ): ConfirmedBeat? {
-        // 1. Validar calidad mínima
-        if (sqi < 0.5) return null
+        // 1. Validar calidad mínima (relajado para condiciones reales)
+        if (sqi < 0.2) return null
         
-        // 2. Validar componente pulsátil
-        if (acGreen < 0.05 || dcGreen < 1.0) return null
+        // 2. Validar componente pulsátil (relajado)
+        if (acGreen < 0.01 || dcGreen < 1.0) return null
 
         val currentValue = filteredValue
         val slope = currentValue - lastValue

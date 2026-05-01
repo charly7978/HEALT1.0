@@ -71,7 +71,7 @@ class PpgPhysiologyClassifier {
             hasClipping
         )
 
-        // 9. Clasificación final
+        // 9. Clasificación final (relajado para condiciones reales)
         val state = when {
             !hasSufficientLight -> PpgValidityState.RAW_OPTICAL_ONLY
             hasClipping -> PpgValidityState.RAW_OPTICAL_ONLY
@@ -79,8 +79,8 @@ class PpgPhysiologyClassifier {
             !hasPulsatileComponent -> PpgValidityState.NO_PHYSIOLOGICAL_SIGNAL
             hasExcessiveMotion -> PpgValidityState.PPG_CANDIDATE
             !isPeriodical -> PpgValidityState.PPG_CANDIDATE
-            sqi < 0.6 -> PpgValidityState.PPG_CANDIDATE
-            sqi < 0.8 -> PpgValidityState.PPG_VALID
+            sqi < 0.3 -> PpgValidityState.PPG_CANDIDATE
+            sqi < 0.5 -> PpgValidityState.PPG_VALID
             else -> PpgValidityState.BIOMETRIC_VALID
         }
 
