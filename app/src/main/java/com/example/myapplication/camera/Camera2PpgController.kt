@@ -4,11 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
 import android.hardware.camera2.*
+import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.example.myapplication.ppg.CameraFrame
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
@@ -260,7 +260,8 @@ class Camera2PpgController(private val context: Context) {
             blueAcDc = blueAcDc,
             clipHighRatio = saturatedCount.toDouble() / totalPixels,
             clipLowRatio = darkCount.toDouble() / totalPixels,
-            roiCoverage = (roiWidth * roiHeight).toDouble() / (width * height)
+            roiCoverage = (roiWidth * roiHeight).toDouble() / (width * height),
+            actualFps = fps
         )
     }
 

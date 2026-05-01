@@ -1,8 +1,7 @@
-package com.example.myapplication.ppg
+package com.example.myapplication.camera
 
 /**
- * Frame de cámara con características ópticas extraídas.
- * Todos los valores provienen de procesamiento real de píxeles.
+ * Representa los datos extraídos de un frame de cámara para procesamiento PPG.
  */
 data class CameraFrame(
     val timestampNs: Long,
@@ -21,5 +20,6 @@ data class CameraFrame(
     val blueAcDc: Double,
     val clipHighRatio: Double,
     val clipLowRatio: Double,
-    val roiCoverage: Double
+    val roiCoverage: Double,
+    val actualFps: Double
 )

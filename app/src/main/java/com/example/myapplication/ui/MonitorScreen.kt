@@ -16,15 +16,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.domain.MeasurementState
-import com.example.myapplication.ppg.DeviceCalibrationManager
+import com.example.myapplication.signal.MeasurementState
 import com.example.myapplication.viewmodel.MonitorViewModel
 
 @Composable
 fun MonitorScreen(viewModel: MonitorViewModel) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val calibrationManager = remember { DeviceCalibrationManager(context) }
 
     val backgroundColor = Color(0xFF070B14)
     val normalSignalColor = Color(0xFF22C55E)
@@ -55,8 +52,8 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
                         uiState.statusMessage,
                         color = when (uiState.state) {
                             MeasurementState.MEASURING -> normalSignalColor
-                            MeasurementState.DEGRADED, MeasurementState.INVALID -> alertColor
-                            MeasurementState.WARMUP -> warningColor
+                            MeasurementState.MOTION_ARTIFACT, MeasurementState.INVALID_SIGNAL -> alertColor
+                            MeasurementState.LOCKING_SIGNAL -> warningColor
                             else -> Color.White.copy(alpha = 0.6f)
                         },
                         fontSize = 18.sp,
@@ -153,7 +150,7 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
     // Pantalla de calibración (overlay)
     if (uiState.showCalibrationScreen) {
         CalibrationScreen(
-            calibrationManager = calibrationManager,
+            calibrationManager = Unit,
             onCalibrationComplete = {
                 viewModel.hideCalibrationScreen()
             },
