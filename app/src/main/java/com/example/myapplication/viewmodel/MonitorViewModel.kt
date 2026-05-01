@@ -97,6 +97,7 @@ class MonitorViewModel(
     private val rhythmAnalyzer = RhythmAnalyzer()
     private val spo2Estimator = Spo2Estimator()
     private val bpmEstimator = BpmEstimator()
+    private val motionDetector = com.example.myapplication.signal.MotionArtifactDetector(context)
 
     // Buffers
     private val waveformBuffer = LinkedList<Double>()
@@ -110,12 +111,16 @@ class MonitorViewModel(
     private var lastFrameTime: Long = 0
 
     init {
+        motionDetector.start()
         cameraController.onFrameAvailable = { sample ->
             frameCount++
             val frameStart = System.nanoTime()
             
+            // Integrar movimiento real del acelerómetro
+            val enrichedSample = sample.copy(motionScore = motionDetector.getMotionScore())
+            
             try {
-                processFrame(sample, frameStart)
+                processFrame(enrichedSample, frameStart)
             } catch (e: Exception) {
                 Log.e("MonitorViewModel", "Error processing frame", e)
             }
@@ -140,6 +145,7 @@ class MonitorViewModel(
 
     fun stop() {
         cameraController.stop()
+        motionDetector.stop()
         resetPipeline()
         _uiState.value = _uiState.value.copy(cameraRunning = false)
     }
@@ -411,6 +417,7 @@ class MonitorViewModel(
     override fun onCleared() {
         super.onCleared()
         stop()
+        motionDetector.stop()
         feedbackController.release()
     }
 }
