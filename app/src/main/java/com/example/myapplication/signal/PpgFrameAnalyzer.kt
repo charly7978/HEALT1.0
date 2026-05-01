@@ -1,31 +1,20 @@
 package com.example.myapplication.signal
 
-import android.graphics.Rect
 import android.media.Image
-import java.nio.ByteBuffer
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
- * Extrae características ópticas crudas del frame de la cámara.
- * No genera ondas ni calcula métricas, solo reporta lo que ve el sensor.
+ * Analiza frames de cámara para extraer PpgSample con datos ópticos completos.
+ * Calcula estadísticas ROI, clipping, movimiento y diagnóstico de exposición.
  */
 class PpgFrameAnalyzer {
 
-    data class FrameFeatures(
-        val timestampNs: Long,
-        val redMean: Double,
-        val greenMean: Double,
-        val blueMean: Double,
-        val lumaMean: Double,
-        val clippedPixelRatio: Double,
-        val darkPixelRatio: Double,
-        val actualFps: Double
-    )
-
-    fun analyze(image: Image, fps: Double): FrameFeatures {
+    fun analyze(image: Image, fps: Double, exposureTimeNs: Long?, iso: Int?, frameDurationNs: Long?): PpgSample {
         val width = image.width
         val height = image.height
         
-        // ROI central del 15% para reducir ruido de bordes y mejorar performance
+        // ROI central del 15%
         val roiWidth = (width * 0.15).toInt()
         val roiHeight = (height * 0.15).toInt()
         val left = (width - roiWidth) / 2
@@ -39,10 +28,9 @@ class PpgFrameAnalyzer {
         val uvRowStride = image.planes[1].rowStride
         val uvPixelStride = image.planes[1].pixelStride
 
-        var sumR = 0.0
-        var sumG = 0.0
-        var sumB = 0.0
-        var sumLuma = 0.0
+        val redValues = ArrayList<Double>()
+        val greenValues = ArrayList<Double>()
+        val blueValues = ArrayList<Double>()
         var saturatedCount = 0
         var darkCount = 0
         val totalPixels = roiWidth * roiHeight
@@ -56,30 +44,92 @@ class PpgFrameAnalyzer {
                 val uVal = (uBuffer[uvIndex].toInt() and 0xFF) - 128
                 val vVal = (vBuffer[uvIndex].toInt() and 0xFF) - 128
 
-                // Conversión YUV a RGB (Estándar BT.601) optimizada
+                // Conversión YUV a RGB (BT.601)
                 val r = (yVal + 1.370705 * vVal).coerceIn(0.0, 255.0)
                 val g = (yVal - 0.337633 * uVal - 0.698001 * vVal).coerceIn(0.0, 255.0)
                 val b = (yVal + 1.732446 * uVal).coerceIn(0.0, 255.0)
 
-                sumR += r
-                sumG += g
-                sumB += b
-                sumLuma += yVal
+                redValues.add(r)
+                greenValues.add(g)
+                blueValues.add(b)
 
                 if (r > 250.0) saturatedCount++
                 if (r < 5.0) darkCount++
             }
         }
 
-        return FrameFeatures(
-            timestampNs = image.timestamp,
-            redMean = sumR / totalPixels,
-            greenMean = sumG / totalPixels,
-            blueMean = sumB / totalPixels,
-            lumaMean = sumLuma / totalPixels,
-            clippedPixelRatio = saturatedCount.toDouble() / totalPixels,
-            darkPixelRatio = darkCount.toDouble() / totalPixels,
-            actualFps = fps
+        val redMean = redValues.average()
+        val greenMean = greenValues.average()
+        val blueMean = blueValues.average()
+
+        // Calcular estadísticas ROI
+        val redMedian = median(redValues)
+        val greenMedian = median(greenValues)
+        val blueMedian = median(blueValues)
+        val redStd = stdDev(redValues, redMean)
+        val greenStd = stdDev(greenValues, greenMean)
+        val blueStd = stdDev(blueValues, blueMean)
+
+        // Calcular movimiento (diferencia inter-frame simulada)
+        val motionScore = calculateMotionScore(redStd, greenStd, blueStd)
+
+        val roiStats = RoiStats(
+            centerX = left + roiWidth / 2,
+            centerY = top + roiHeight / 2,
+            width = roiWidth,
+            height = roiHeight,
+            pixelCount = totalPixels,
+            medianRed = redMedian,
+            medianGreen = greenMedian,
+            medianBlue = blueMedian,
+            stdRed = redStd,
+            stdGreen = greenStd,
+            stdBlue = blueStd
         )
+
+        val clipping = ClippingInfo(
+            highClipRatio = saturatedCount.toDouble() / totalPixels,
+            lowClipRatio = darkCount.toDouble() / totalPixels,
+            isSaturated = saturatedCount > totalPixels * 0.3,
+            isDark = darkCount > totalPixels * 0.8
+        )
+
+        val exposureDiagnostics = ExposureDiagnostics(
+            exposureTimeNs = exposureTimeNs,
+            iso = iso,
+            frameDurationNs = frameDurationNs,
+            torchEnabled = true
+        )
+
+        return PpgSample(
+            timestampNs = image.timestamp,
+            rawRed = redMean,
+            rawGreen = greenMean,
+            rawBlue = blueMean,
+            roiStats = roiStats,
+            clipping = clipping,
+            motionScore = motionScore,
+            exposureDiagnostics = exposureDiagnostics
+        )
+    }
+
+    private fun median(values: List<Double>): Double {
+        val sorted = values.sorted()
+        val size = sorted.size
+        return if (size % 2 == 0) {
+            (sorted[size / 2 - 1] + sorted[size / 2]) / 2.0
+        } else {
+            sorted[size / 2]
+        }
+    }
+
+    private fun stdDev(values: List<Double>, mean: Double): Double {
+        return sqrt(values.map { (it - mean) * (it - mean) }.average())
+    }
+
+    private fun calculateMotionScore(redStd: Double, greenStd: Double, blueStd: Double): Double {
+        // Puntuación de movimiento basada en desviación estándar
+        val totalStd = (redStd + greenStd + blueStd) / 3.0
+        return (totalStd / 50.0).coerceIn(0.0, 1.0)
     }
 }

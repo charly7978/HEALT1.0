@@ -1,23 +1,54 @@
 package com.example.myapplication.signal
 
 /**
- * Estimador de SpO2 honesto y basado en calibración.
- * No devuelve valores si no hay señal válida o calibración.
+ * Estimador de SpO2 basado en calibración por dispositivo.
+ * NO devuelve valores fijos ni hardcodeados.
+ * Requiere calibración para mostrar valores válidos.
  */
 class Spo2Estimator {
 
     enum class Spo2Status {
         NOT_AVAILABLE,
         LOW_QUALITY,
-        UNCALIBRATED,
+        NO_CALIBRATION,
+        UNSTABLE_SIGNAL,
         VALID
     }
 
     data class Spo2Result(
         val value: Int?,
         val status: Spo2Status,
-        val confidence: Double
+        val confidence: Double,
+        val ratioR: Double,
+        val calibrationStatus: String
     )
+
+    // Parámetros de calibración (por defecto no calibrado)
+    private var calibrationA: Double? = null
+    private var calibrationB: Double? = null
+    private var calibrationC: Double? = null
+    private var isCalibrated: Boolean = false
+
+    /**
+     * Establece parámetros de calibración para el dispositivo.
+     * Modelo: SpO2 = A + B*R + C*R^2
+     */
+    fun setCalibration(a: Double, b: Double, c: Double = 0.0) {
+        calibrationA = a
+        calibrationB = b
+        calibrationC = c
+        isCalibrated = true
+    }
+
+    /**
+     * Limpia la calibración.
+     */
+    fun clearCalibration() {
+        calibrationA = null
+        calibrationB = null
+        calibrationC = null
+        isCalibrated = false
+    }
 
     /**
      * Calcula SpO2 basado en el Ratio de Ratios (R).
@@ -27,24 +58,74 @@ class Spo2Estimator {
         acRed: Double, dcRed: Double,
         acGreen: Double, dcGreen: Double,
         sqi: Double,
-        isCalibrated: Boolean = false // Por defecto false hasta tener perfil de dispositivo
+        windowStability: Double = 0.0
     ): Spo2Result {
         
-        if (sqi < 0.75 || dcRed < 1.0 || dcGreen < 1.0 || acRed < 0.01 || acGreen < 0.01) {
-            return Spo2Result(null, Spo2Status.LOW_QUALITY, 0.0)
+        // 1. Validar calidad mínima
+        if (sqi < 0.7 || dcRed < 1.0 || dcGreen < 1.0 || acRed < 0.01 || acGreen < 0.01) {
+            return Spo2Result(
+                null, 
+                Spo2Status.LOW_QUALITY, 
+                0.0, 
+                0.0, 
+                if (isCalibrated) "CALIBRADO" else "SIN CALIBRACIÓN"
+            )
         }
 
+        // 2. Validar estabilidad de ventana
+        if (windowStability < 0.5) {
+            return Spo2Result(
+                null, 
+                Spo2Status.UNSTABLE_SIGNAL, 
+                sqi, 
+                0.0, 
+                if (isCalibrated) "CALIBRADO" else "SIN CALIBRACIÓN"
+            )
+        }
+
+        // 3. Calcular ratio R
         val r = (acRed / dcRed) / (acGreen / dcGreen)
         
-        // Curva genérica experimental (SOLO para fines de desarrollo, se marca como UNCALIBRATED)
-        // SpO2 = 110 - 25 * R
-        val estimatedValue = (110.0 - 20.0 * r).toInt().coerceIn(70, 100)
-
-        return if (isCalibrated) {
-            Spo2Result(estimatedValue, Spo2Status.VALID, sqi)
-        } else {
-            // Reportamos el valor pero con estado UNCALIBRATED para que la UI decida si mostrarlo con advertencia
-            Spo2Result(estimatedValue, Spo2Status.UNCALIBRATED, sqi * 0.5)
+        // 4. Si no hay calibración, NO devolver valor
+        if (!isCalibrated) {
+            return Spo2Result(
+                null, 
+                Spo2Status.NO_CALIBRATION, 
+                sqi, 
+                r, 
+                "SIN CALIBRACIÓN - REQUIERE CALIBRACIÓN POR DISPOSITIVO"
+            )
         }
+
+        // 5. Calcular SpO2 usando calibración
+        val a = calibrationA ?: 110.0
+        val b = calibrationB ?: -20.0
+        val c = calibrationC ?: 0.0
+        
+        val estimatedValue = (a + b * r + c * r * r).toInt().coerceIn(70, 100)
+
+        return Spo2Result(
+            value = estimatedValue,
+            status = Spo2Status.VALID,
+            confidence = sqi,
+            ratioR = r,
+            calibrationStatus = "CALIBRADO"
+        )
+    }
+
+    /**
+     * Obtiene el índice experimental sin calibración (SOLO para diagnóstico).
+     * NO debe mostrarse como SpO2 válido al usuario.
+     */
+    fun getExperimentalIndex(
+        acRed: Double, dcRed: Double,
+        acGreen: Double, dcGreen: Double,
+        sqi: Double
+    ): Double? {
+        if (sqi < 0.7 || dcRed < 1.0 || dcGreen < 1.0) return null
+        
+        val r = (acRed / dcRed) / (acGreen / dcGreen)
+        // Índice experimental genérico (NO es SpO2)
+        return 110.0 - 20.0 * r
     }
 }

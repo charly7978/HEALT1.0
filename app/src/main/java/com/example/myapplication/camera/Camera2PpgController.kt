@@ -9,11 +9,14 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import com.example.myapplication.signal.PpgFrameAnalyzer
+import com.example.myapplication.signal.PpgSample
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
 /**
  * Controlador avanzado de Camera2 optimizado para captura PPG continua con FLASH estable.
+ * Usa PpgFrameAnalyzer para extraer datos ópticos completos.
  */
 class Camera2PpgController(private val context: Context) {
 
@@ -25,9 +28,10 @@ class Camera2PpgController(private val context: Context) {
 
     private val cameraOpenCloseLock = Semaphore(1)
     private var currentCameraId: String = "unknown"
+    private val frameAnalyzer = PpgFrameAnalyzer()
 
-    // Usamos CameraFrame como tipo de salida para el pipeline refactorizado
-    var onFrameAvailable: ((CameraFrame) -> Unit)? = null
+    // Salida: PpgSample en lugar de CameraFrame
+    var onFrameAvailable: ((PpgSample) -> Unit)? = null
     
     private var lastFrameTimestampNs: Long = 0
     private var actualFps: Double = 0.0
@@ -93,8 +97,8 @@ class Camera2PpgController(private val context: Context) {
                 lastFrameTimestampNs = now
                 
                 try {
-                    val frame = extractCameraFrame(image, actualFps)
-                    onFrameAvailable?.invoke(frame)
+                    val sample = frameAnalyzer.analyze(image, actualFps, exposureTimeNs, iso, frameDurationNs)
+                    onFrameAvailable?.invoke(sample)
                 } catch (e: Exception) {
                     Log.e("Camera2PpgController", "Analysis error", e)
                 } finally {
@@ -172,106 +176,5 @@ class Camera2PpgController(private val context: Context) {
         backgroundThread?.quitSafely()
         backgroundThread = null
         backgroundHandler = null
-    }
-
-    /**
-     * Extrae CameraFrame de Image YUV.
-     */
-    private fun extractCameraFrame(image: Image, fps: Double): CameraFrame {
-        val width = image.width
-        val height = image.height
-        
-        // ROI central del 15%
-        val roiWidth = (width * 0.15).toInt()
-        val roiHeight = (height * 0.15).toInt()
-        val left = (width - roiWidth) / 2
-        val top = (height - roiHeight) / 2
-
-        val yBuffer = image.planes[0].buffer
-        val uBuffer = image.planes[1].buffer
-        val vBuffer = image.planes[2].buffer
-
-        val yRowStride = image.planes[0].rowStride
-        val uvRowStride = image.planes[1].rowStride
-        val uvPixelStride = image.planes[1].pixelStride
-
-        var sumR = 0.0
-        var sumG = 0.0
-        var sumB = 0.0
-        var saturatedCount = 0
-        var darkCount = 0
-        val totalPixels = roiWidth * roiHeight
-
-        // Buffers para cálculo AC/DC
-        val redValues = ArrayList<Double>(totalPixels)
-        val greenValues = ArrayList<Double>(totalPixels)
-        val blueValues = ArrayList<Double>(totalPixels)
-
-        for (y in top until (top + roiHeight)) {
-            for (x in left until (left + roiWidth)) {
-                val yIndex = y * yRowStride + x
-                val uvIndex = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
-
-                val yVal = (yBuffer[yIndex].toInt() and 0xFF)
-                val uVal = (uBuffer[uvIndex].toInt() and 0xFF) - 128
-                val vVal = (vBuffer[uvIndex].toInt() and 0xFF) - 128
-
-                // Conversión YUV a RGB (BT.601)
-                val r = (yVal + 1.370705 * vVal).coerceIn(0.0, 255.0)
-                val g = (yVal - 0.337633 * uVal - 0.698001 * vVal).coerceIn(0.0, 255.0)
-                val b = (yVal + 1.732446 * uVal).coerceIn(0.0, 255.0)
-
-                sumR += r
-                sumG += g
-                sumB += b
-
-                redValues.add(r)
-                greenValues.add(g)
-                blueValues.add(b)
-
-                if (r > 250.0) saturatedCount++
-                if (r < 5.0) darkCount++
-            }
-        }
-
-        val redMean = sumR / totalPixels
-        val greenMean = sumG / totalPixels
-        val blueMean = sumB / totalPixels
-
-        // Calcular AC/DC
-        val redAcDc = calculateAcDc(redValues)
-        val greenAcDc = calculateAcDc(greenValues)
-        val blueAcDc = calculateAcDc(blueValues)
-
-        return CameraFrame(
-            timestampNs = image.timestamp,
-            width = width,
-            height = height,
-            format = image.format,
-            cameraId = currentCameraId,
-            exposureTimeNs = exposureTimeNs,
-            iso = iso,
-            frameDurationNs = frameDurationNs,
-            redMean = redMean,
-            greenMean = greenMean,
-            blueMean = blueMean,
-            redAcDc = redAcDc,
-            greenAcDc = greenAcDc,
-            blueAcDc = blueAcDc,
-            clipHighRatio = saturatedCount.toDouble() / totalPixels,
-            clipLowRatio = darkCount.toDouble() / totalPixels,
-            roiCoverage = (roiWidth * roiHeight).toDouble() / (width * height),
-            actualFps = fps
-        )
-    }
-
-    /**
-     * Calcula ratio AC/DC de un canal.
-     */
-    private fun calculateAcDc(values: ArrayList<Double>): Double {
-        if (values.isEmpty()) return 0.0
-        val dc = values.average()
-        val ac = (values.maxOrNull()!! - values.minOrNull()!!) / 2.0
-        return if (dc > 0) ac / dc else 0.0
     }
 }
