@@ -9,8 +9,8 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.example.myapplication.ppg.PpgFrameAnalyzer
-import com.example.myapplication.ppg.PpgSample
+import com.example.myapplication.signal.PpgFrameAnalyzer
+import com.example.myapplication.signal.PpgFrame
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
@@ -30,8 +30,8 @@ class Camera2PpgController(private val context: Context) {
     private var currentCameraId: String = "unknown"
     private val frameAnalyzer = PpgFrameAnalyzer()
 
-    // Salida: PpgSample en lugar de CameraFrame
-    var onFrameAvailable: ((PpgSample) -> Unit)? = null
+    // Salida: PpgFrame como única estructura de datos PPG
+    var onFrameAvailable: ((PpgFrame) -> Unit)? = null
     
     private var lastFrameTimestampNs: Long = 0
     private var actualFps: Double = 0.0
@@ -97,8 +97,15 @@ class Camera2PpgController(private val context: Context) {
                 lastFrameTimestampNs = now
                 
                 try {
-                    val sample = frameAnalyzer.analyze(image, actualFps, exposureTimeNs, iso, frameDurationNs)
-                    onFrameAvailable?.invoke(sample)
+                    val frame = frameAnalyzer.analyze(
+                        image = image,
+                        fps = actualFps,
+                        exposureTimeNs = exposureTimeNs,
+                        iso = iso,
+                        frameDurationNs = frameDurationNs,
+                        externalMotionScore = 0.0 // Se actualiza externamente con acelerómetro
+                    )
+                    onFrameAvailable?.invoke(frame)
                 } catch (e: Exception) {
                     Log.e("Camera2PpgController", "Analysis error", e)
                 } finally {

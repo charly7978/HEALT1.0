@@ -1,5 +1,6 @@
 package com.example.myapplication.ppg
 
+import com.example.myapplication.signal.PpgFrame
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -58,8 +59,8 @@ class PpgPhysiologyClassifier {
 
     /**
      * Clasifica la señal PPG con criterios estrictos de validación fisiológica.
-     * 
-     * @param sample Muestra PPG con datos ópticos crudos
+     *
+     * @param frame Frame PPG con datos ópticos crudos
      * @param filteredSignal Señal filtrada bandpass
      * @param acRed Componente AC rojo (pulsátil)
      * @param dcRed Componente DC rojo (baseline)
@@ -69,7 +70,7 @@ class PpgPhysiologyClassifier {
      * @param samplingRate FPS efectivo
      */
     fun classify(
-        sample: PpgSample,
+        frame: PpgFrame,
         filteredSignal: Double,
         acRed: Double,
         dcRed: Double,
@@ -78,33 +79,33 @@ class PpgPhysiologyClassifier {
         sqi: Double,
         samplingRate: Double = 30.0
     ): ClassificationResult {
-        
-        val timestamp = sample.timestampNs
-        
+
+        val timestamp = frame.timestampNs
+
         // Actualizar buffers
         signalBuffer.addLast(filteredSignal)
         timestampBuffer.addLast(timestamp)
-        redDcBuffer.addLast(sample.rawRed)
+        redDcBuffer.addLast(frame.avgRed)
         greenAcBuffer.addLast(acGreen)
-        
+
         if (signalBuffer.size > robustWindow) {
             signalBuffer.removeFirst()
             timestampBuffer.removeFirst()
             redDcBuffer.removeFirst()
             greenAcBuffer.removeFirst()
         }
-        
+
         // ========== 1. ANÁLISIS DE SATURACIÓN/CLIPPING ==========
-        if (sample.clipping.isSaturated || sample.clipping.highClipRatio > 0.2) {
+        if (frame.clipping.isSaturated || frame.clipping.highClipRatio > 0.2) {
             consecutiveValidFrames = 0
             return buildResult(
-                PpgValidityState.SATURATED, 
+                PpgValidityState.SATURATED,
                 0.0, 0.0, 0.0, false, 0.0,
                 "Señal saturada - reducir exposición o alejar dedo", false
             )
         }
-        
-        if (sample.clipping.isDark || sample.clipping.lowClipRatio > 0.8) {
+
+        if (frame.clipping.isDark || frame.clipping.lowClipRatio > 0.8) {
             consecutiveValidFrames = 0
             return buildResult(
                 PpgValidityState.MEASURING_RAW_OPTICAL,
@@ -112,11 +113,11 @@ class PpgPhysiologyClassifier {
                 "Señal oscura - acercar dedo o verificar flash", false
             )
         }
-        
+
         // ========== 2. ANÁLISIS DE PERFUSIÓN ==========
         val piRed = if (dcRed > 0) (acRed / dcRed) * 100.0 else 0.0
         val piGreen = if (dcGreen > 0) (acGreen / dcGreen) * 100.0 else 0.0
-        
+
         if (piRed < 0.02 && piGreen < 0.02) {
             consecutiveValidFrames = 0
             return buildResult(
@@ -125,12 +126,12 @@ class PpgPhysiologyClassifier {
                 "Perfusión insuficiente - presionar más fuerte o revisar posición", false
             )
         }
-        
+
         // ========== 3. ANÁLISIS DE DOMINANCIA ROJA ==========
         // Tejido humano traslúcido: dominancia roja pero NO saturación total
-        val redRatio = sample.rawRed / (sample.rawGreen + 1.0)
-        val isRedDominant = sample.rawRed > sample.rawGreen * 1.3 && 
-                           sample.rawRed > sample.rawBlue * 1.5
+        val redRatio = frame.avgRed / (frame.avgGreen + 1.0)
+        val isRedDominant = frame.avgRed > frame.avgGreen * 1.3 &&
+                           frame.avgRed > frame.avgBlue * 1.5
         
         // Una sábana roja tiene dominancia roja pero sin componente AC pulsátil
         val hasAcPulsatility = acRed > 0.03 || acGreen > 0.03
@@ -149,7 +150,7 @@ class PpgPhysiologyClassifier {
         }
         
         // ========== 4. ANÁLISIS DE MOVIMIENTO ==========
-        if (sample.motionScore > 0.5) {
+        if (frame.motionScore > 0.5) {
             consecutiveValidFrames = 0
             return buildResult(
                 PpgValidityState.MOTION_ARTIFACT,
@@ -198,7 +199,7 @@ class PpgPhysiologyClassifier {
         // ========== 9. TRANSIENTES Y ESTABILIDAD ==========
         // Detectar cambios bruscos en DC que indican movimiento o pérdida de contacto
         val dcStability = calculateDcStability()
-        if (!dcStability && sample.motionScore > 0.2) {
+        if (!dcStability && frame.motionScore > 0.2) {
             consecutiveValidFrames = 0
             return buildResult(
                 PpgValidityState.PPG_DEGRADED,

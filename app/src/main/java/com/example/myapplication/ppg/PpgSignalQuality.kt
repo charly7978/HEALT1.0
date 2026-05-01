@@ -1,5 +1,6 @@
 package com.example.myapplication.ppg
 
+import com.example.myapplication.signal.PpgFrame
 import kotlin.math.abs
 
 /**
@@ -20,19 +21,19 @@ class PpgSignalQuality {
     private val maxBufferSize = 300 // ~10 segundos a 30 FPS
 
     fun compute(
-        sample: PpgSample,
+        frame: PpgFrame,
         acRed: Double,
         acGreen: Double,
         filteredSignal: Double,
         isPeriodical: Boolean
     ): SqiResult {
         // 1. Perfusion Index (PI) = (AC / DC) * 100
-        val piRed = if (sample.rawRed > 0) (acRed / sample.rawRed) * 100.0 else 0.0
-        val piGreen = if (sample.rawGreen > 0) (acGreen / sample.rawGreen) * 100.0 else 0.0
-        
+        val piRed = if (frame.avgRed > 0) (acRed / frame.avgRed) * 100.0 else 0.0
+        val piGreen = if (frame.avgGreen > 0) (acGreen / frame.avgGreen) * 100.0 else 0.0
+
         // 2. Estabilidad DC (Detección de artefactos de movimiento brusco)
-        val dcChange = if (lastRedDc > 0) abs(sample.rawRed - lastRedDc) / lastRedDc else 0.0
-        lastRedDc = sample.rawRed
+        val dcChange = if (lastRedDc > 0) abs(frame.avgRed - lastRedDc) / lastRedDc else 0.0
+        lastRedDc = frame.avgRed
         val isStable = dcChange < 0.05 // Menos del 5% de cambio entre frames
 
         // 3. Cálculo de SNR

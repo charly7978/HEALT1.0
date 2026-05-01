@@ -1,5 +1,6 @@
 package com.example.myapplication.ppg
 
+import com.example.myapplication.signal.PpgFrame
 import java.util.*
 
 /**
@@ -36,49 +37,38 @@ class PpgSignalProcessor(samplingRate: Double) {
         val isDetrended: Boolean
     )
 
-    fun process(sample: PpgSample): ProcessedSample {
+    fun process(frame: PpgFrame): ProcessedSample {
         // 1. Filtrado de la señal (canal verde para mejor SNR en piel)
-        val filtered = filter.filter(sample.rawGreen)
-        
+        val filtered = filter.filter(frame.avgGreen)
+
         // 2. Detrending simple (restar media móvil)
         val detrended = detrend(filtered)
-        
+
         signalBuffer.addLast(detrended)
         if (signalBuffer.size > maxBufferSize) signalBuffer.removeFirst()
 
-        rawBuffer.addLast(sample.rawGreen)
+        rawBuffer.addLast(frame.avgGreen)
         if (rawBuffer.size > maxBufferSize) rawBuffer.removeFirst()
 
-        // 3. Extracción de AC/DC (ventana móvil de 2 segundos)
-        dcWindow.addLast(sample.rawGreen)
-        if (dcWindow.size > dcWindowSize) dcWindow.removeFirst()
-
-        if (dcWindow.size >= dcWindowSize) {
-            val recentSignal = signalBuffer.takeLast(dcWindowSize)
-            val maxVal = recentSignal.maxOrNull() ?: 0.0
-            val minVal = recentSignal.minOrNull() ?: 0.0
-            currentAcGreen = (maxVal - minVal) / 2.0
-            currentDcGreen = dcWindow.average()
-
-            val recentRawRed = sample.roiStats.medianRed
-            currentAcRed = (sample.roiStats.stdRed * 2.0) // Estimación AC desde desviación
-            currentDcRed = sample.rawRed
-
-            val recentRawBlue = sample.roiStats.medianBlue
-            currentAcBlue = (sample.roiStats.stdBlue * 2.0)
-            currentDcBlue = sample.rawBlue
-        }
+        // 3. Usar AC/DC calculados por PpgFrameAnalyzer (más precisos)
+        // PpgFrame ya contiene greenAc, greenDc calculados por ventana móvil
+        currentAcGreen = frame.greenAc
+        currentDcGreen = frame.greenDc
+        currentAcRed = frame.redAc
+        currentDcRed = frame.redDc
+        currentAcBlue = frame.blueAc
+        currentDcBlue = frame.blueDc
 
         return ProcessedSample(
             filteredValue = detrended,
-            rawValue = sample.rawGreen,
+            rawValue = frame.avgGreen,
             acRed = currentAcRed,
             dcRed = currentDcRed,
             acGreen = currentAcGreen,
             dcGreen = currentDcGreen,
             acBlue = currentAcBlue,
             dcBlue = currentDcBlue,
-            timestamp = sample.timestampNs,
+            timestamp = frame.timestampNs,
             isDetrended = true
         )
     }

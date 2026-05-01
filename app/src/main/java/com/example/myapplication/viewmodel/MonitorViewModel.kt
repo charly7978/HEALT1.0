@@ -7,6 +7,8 @@ import com.example.myapplication.camera.Camera2PpgController
 import com.example.myapplication.haptics.BeatFeedbackController
 import com.example.myapplication.ppg.*
 import com.example.myapplication.signal.BpmEstimator
+import com.example.myapplication.signal.PpgFrame
+import com.example.myapplication.signal.PpgSignalBuffer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -112,15 +114,15 @@ class MonitorViewModel(
 
     init {
         motionDetector.start()
-        cameraController.onFrameAvailable = { sample ->
+        cameraController.onFrameAvailable = { frame ->
             frameCount++
             val frameStart = System.nanoTime()
-            
+
             // Integrar movimiento real del acelerómetro
-            val enrichedSample = sample.copy(motionScore = motionDetector.getMotionScore())
-            
+            val enrichedFrame = frame.copy(motionScore = motionDetector.getMotionScore())
+
             try {
-                processFrame(enrichedSample, frameStart)
+                processFrame(enrichedFrame, frameStart)
             } catch (e: Exception) {
                 Log.e("MonitorViewModel", "Error processing frame", e)
             }
@@ -168,25 +170,25 @@ class MonitorViewModel(
         spo2Estimator.clearCalibration()
     }
 
-    private fun processFrame(sample: PpgSample, frameStartNs: Long) {
+    private fun processFrame(frame: PpgFrame, frameStartNs: Long) {
         viewModelScope.launch {
             val processingStart = System.nanoTime()
-            
+
             // 1. PROCESAR SEÑAL (filtrado, AC/DC)
-            val processed = signalProcessor.process(sample)
-            
+            val processed = signalProcessor.process(frame)
+
             // 2. CALCULAR SQI
             val sqiResult = qualityEngine.compute(
-                sample = sample,
+                frame = frame,
                 acRed = processed.acRed,
                 acGreen = processed.acGreen,
                 filteredSignal = processed.filteredValue,
                 isPeriodical = false // Se actualizará después de clasificación
             )
-            
+
             // 3. CLASIFICAR FISIOLOGÍA
             val classification = physiologyClassifier.classify(
-                sample = sample,
+                frame = frame,
                 filteredSignal = processed.filteredValue,
                 acRed = processed.acRed,
                 dcRed = processed.dcRed,
@@ -213,7 +215,7 @@ class MonitorViewModel(
             // 4. DETECTAR PICOS (SOLO si PPG válido)
             val beatEvent = peakDetector.detect(
                 filteredValue = processed.filteredValue,
-                timestampNs = sample.timestampNs,
+                timestampNs = frame.timestampNs,
                 sqi = sqiResult.totalSqi,
                 validityState = classification.state,
                 acComponent = processed.acGreen
@@ -302,8 +304,8 @@ class MonitorViewModel(
             val latencyMs = (processingEnd - processingStart) / 1_000_000.0
             
             // 11. ACTUALIZAR UI
-            val fps = sample.exposureDiagnostics.frameDurationNs?.let { 
-                1_000_000_000.0 / it 
+            val fps = frame.exposureDiagnostics.frameDurationNs?.let {
+                1_000_000_000.0 / it
             } ?: 0.0
             
             _uiState.value = MonitorUiState(
@@ -338,16 +340,16 @@ class MonitorViewModel(
                 
                 sqi = sqiResult.totalSqi,
                 perfusionIndex = sqiResult.perfusionIndex,
-                motionScore = sample.motionScore,
+                motionScore = frame.motionScore,
                 snr = sqiResult.snr,
-                
+
                 cameraRunning = true,
                 actualFps = fps,
-                exposureTimeNs = sample.exposureDiagnostics.exposureTimeNs,
-                iso = sample.exposureDiagnostics.iso,
+                exposureTimeNs = frame.exposureDiagnostics.exposureTimeNs,
+                iso = frame.exposureDiagnostics.iso,
                 latencyMs = latencyMs,
-                clippingHigh = sample.clipping.highClipRatio,
-                clippingLow = sample.clipping.lowClipRatio,
+                clippingHigh = frame.clipping.highClipRatio,
+                clippingLow = frame.clipping.lowClipRatio,
                 
                 beepEnabled = feedbackController.isBeepEnabled,
                 vibrationEnabled = feedbackController.isVibrationEnabled,
