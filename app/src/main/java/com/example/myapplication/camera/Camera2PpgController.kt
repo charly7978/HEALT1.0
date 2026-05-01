@@ -9,8 +9,8 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.example.myapplication.signal.PpgFrameAnalyzer
-import com.example.myapplication.signal.PpgSample
+import com.example.myapplication.ppg.PpgFrameAnalyzer
+import com.example.myapplication.ppg.PpgSample
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 

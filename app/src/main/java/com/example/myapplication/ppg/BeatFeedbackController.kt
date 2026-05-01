@@ -1,4 +1,4 @@
-package com.example.myapplication.haptics
+package com.example.myapplication.ppg
 
 import android.content.Context
 import android.media.AudioManager

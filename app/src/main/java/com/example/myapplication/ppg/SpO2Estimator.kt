@@ -1,4 +1,4 @@
-package com.example.myapplication.signal
+package com.example.myapplication.ppg
 
 /**
  * Estimador de SpO2 basado en calibración por dispositivo.

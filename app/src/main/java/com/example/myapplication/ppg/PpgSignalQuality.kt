@@ -1,4 +1,4 @@
-package com.example.myapplication.signal
+package com.example.myapplication.ppg
 
 import kotlin.math.abs
 

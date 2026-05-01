@@ -16,8 +16,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.signal.PpgPhysiologyClassifier
-import com.example.myapplication.signal.RhythmAnalyzer
+import com.example.myapplication.ppg.PpgPhysiologyClassifier
+import com.example.myapplication.ppg.RhythmAnalyzer
 import com.example.myapplication.viewmodel.MonitorViewModel
 
 /**

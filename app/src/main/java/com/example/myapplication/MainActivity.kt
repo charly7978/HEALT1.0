@@ -18,7 +18,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 
 import com.example.myapplication.camera.Camera2PpgController
-import com.example.myapplication.haptics.BeatFeedbackController
+import com.example.myapplication.ppg.BeatFeedbackController
 
 class MainActivity : ComponentActivity() {
 

@@ -1,4 +1,4 @@
-package com.example.myapplication.signal
+package com.example.myapplication.ppg
 
 /**
  * Muestra de señal PPG cruda extraída de un frame de cámara.

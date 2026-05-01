@@ -3,8 +3,7 @@ package com.example.myapplication.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.camera.Camera2PpgController
-import com.example.myapplication.haptics.BeatFeedbackController
-import com.example.myapplication.signal.*
+import com.example.myapplication.ppg.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
