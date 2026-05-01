@@ -286,7 +286,6 @@ fun PpgWaveformCanvas(
         // 3. Marcadores de latidos confirmados
         if (confirmedBeats.isNotEmpty()) {
             val recentBeats = confirmedBeats.takeLast(20)
-            val waveformTimestamps = generateTimestamps(waveform.size)
             
             recentBeats.forEach { beat ->
                 val markerColor = if (isIrregular) Color(0xFFEF4444) else Color(0xFF22C55E)
@@ -294,25 +293,20 @@ fun PpgWaveformCanvas(
                 // Línea vertical
                 val x = (beat.timestampNs % 13_333_333_333L).toFloat() / 13_333_333_333f * width // Posición aproximada
                 drawLine(
-                    markerColor,
-                    Offset(x, height * 0.1f),
-                    Offset(x, height * 0.9f),
-                    Stroke(width = 1.dp.toPx())
+                    color = markerColor,
+                    start = Offset(x, height * 0.1f),
+                    end = Offset(x, height * 0.9f),
+                    strokeWidth = 1.dp.toPx()
                 )
                 
                 // Círculo en el pico
                 drawCircle(
-                    markerColor,
+                    color = markerColor,
                     radius = 4.dp.toPx(),
                     center = Offset(x, height * 0.5f)
                 )
             }
         }
-    }
-
-    private fun generateTimestamps(size: Int): List<Long> {
-        val now = System.nanoTime()
-        return (0 until size).map { now - (size - it) * 33_333_333L }
     }
 }
 
