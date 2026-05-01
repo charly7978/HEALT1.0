@@ -3,6 +3,7 @@ package com.example.myapplication
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,15 +43,28 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            monitorViewModel?.start()
+            try {
+                monitorViewModel?.start()
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error starting after permission", e)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        val cameraController = Camera2PpgController(this)
-        val feedbackController = BeatFeedbackController(this)
+        val cameraController: Camera2PpgController
+        val feedbackController: BeatFeedbackController
+        
+        try {
+            cameraController = Camera2PpgController(this)
+            feedbackController = BeatFeedbackController(this)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error creating controllers", e)
+            return
+        }
+        
         val factory = MonitorViewModelFactory(cameraController, feedbackController, this)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

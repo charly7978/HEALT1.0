@@ -55,7 +55,9 @@ class PpgSignalProcessor(samplingRate: Double) {
 
         if (dcWindow.size >= dcWindowSize) {
             val recentSignal = signalBuffer.takeLast(dcWindowSize)
-            currentAcGreen = (recentSignal.maxOrNull() ?: 0.0 - (recentSignal.minOrNull() ?: 0.0)) / 2.0
+            val maxVal = recentSignal.maxOrNull() ?: 0.0
+            val minVal = recentSignal.minOrNull() ?: 0.0
+            currentAcGreen = (maxVal - minVal) / 2.0
             currentDcGreen = dcWindow.average()
 
             val recentRawRed = sample.roiStats.medianRed

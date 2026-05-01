@@ -132,11 +132,15 @@ class Camera2PpgController(private val context: Context) {
         requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
         requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
 
-        device.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+        val surfaceList = listOf(surface)
+        
+        @Suppress("DEPRECATION")
+        device.createCaptureSession(surfaceList, object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
                 captureSession = session
                 try {
                     session.setRepeatingRequest(requestBuilder.build(), null, backgroundHandler)
+                    Log.d("Camera2PpgController", "Session configured successfully")
                 } catch (e: Exception) {
                     Log.e("Camera2PpgController", "Repeating request error", e)
                 }

@@ -1,5 +1,6 @@
 package com.example.myapplication.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.camera.Camera2PpgController
@@ -64,13 +65,22 @@ class MonitorViewModel(
 
     init {
         cameraController.onFrameAvailable = { sample ->
-            processFrame(sample)
+            try {
+                processFrame(sample)
+            } catch (e: Exception) {
+                Log.e("MonitorViewModel", "Error processing frame", e)
+            }
         }
     }
 
     fun start() {
-        cameraController.start()
-        _uiState.value = _uiState.value.copy(statusMessage = "INICIANDO CÁMARA...")
+        try {
+            cameraController.start()
+            _uiState.value = _uiState.value.copy(statusMessage = "INICIANDO CÁMARA...")
+        } catch (e: Exception) {
+            Log.e("MonitorViewModel", "Error starting camera", e)
+            _uiState.value = _uiState.value.copy(statusMessage = "ERROR AL INICIAR CÁMARA")
+        }
     }
 
     fun stop() {
